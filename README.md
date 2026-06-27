@@ -18,10 +18,13 @@ Idea: Get people warmed up with Torch-MLIR and remind them of the last tutorial,
 
 # Demo 0: TBD
 
+In this repository, you will find a Git submodule of torch-mlir. This was a recent version of torch-mlir that was available when I wrote this tutorial. There is nothing special about it, I just verified that it worked on the code in this tutorial, so I provide it here such that the results of the tutorial will always match in the future. Make sure you have initialized the submodule using:
 ```
 git submodule update --init --recursive
 ```
+This command may take some time since it also initializes the submodules of torch-mlir, which includes LLVM.
 
+Unlike the last tutorial, which used Bash scripts, this tutorial uses Python scripts to lower code through MLIR. Python makes it much more convenient to work with the torch-mlir passes. The following commands will set up a Python virtual environment and install the necessary python libraries to run the scripts in the demos. It is also required to build LLVM correctly in the next step.
 ```
 python3 -m venv .venv
 source .venv/bin/activate
@@ -29,6 +32,12 @@ pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
+This tutorial uses the Ninja generator to build torch-mlir, this can be installed using:
+```
+apt-get install ninja-build
+```
+
+After initializing the submodules and installing the necessary Python dependencies, we can build torch-mlir using the following commands.
 ```
 cmake -GNinja -Bbuild \
     -DCMAKE_BUILD_TYPE=Release \
@@ -43,9 +52,13 @@ cmake -GNinja -Bbuild \
     external/torch-mlir/externals/llvm-project/llvm
 
 cmake --build build --target tools/torch-mlir/all mlir-opt mlir-translate llc mlir_runner_utils mlir_c_runner_utils
+```
 
+Finally, we will need to update our Python Path to point to the torch-mlir python packages. I think this needs to be done for every terminal instance. There are ways to do this permanently with your python virtual environment, but this is beyond the scope of this tutorial (and is annoying). For now, every session that you want to run these demos, run:
+```
 export PYTHONPATH="$(pwd)/build/tools/torch-mlir/python_packages/torch_mlir:$PYTHONPATH"
 ```
+<!-- TODO: Verify if this is true, or if there is an easy repeatable way to do this. -->
 
 These instructions were graciously donated by Robert Luo from his WaferScapeMapper project: https://github.com/robluo/WaferScapeMapper/tree/main
 
@@ -70,8 +83,9 @@ will look something like the figure below:
 
 TODO: Add figure of hardware accelerator.
 
-This hardware accelerator architecture is based on other popular hardware accelerators, I have just simplified it slightly for
-brevity. This accelerator has three compute units: a systolic array for accelerating matrix multiply operations, a vector unit
+This hardware accelerator architecture is based on the [Huawei DaVinci AI chip](https://doi.org/10.1016/j.jpdc.2023.01.008) that I used to work with, but I have simplified it slightly for brevity (and obfuscated a few things). The architecture is made of publically available information on the DaVinci chip, where I filled in some gaps using the [Google TPU architecture](https://doi-org.myaccess.library.utoronto.ca/10.1145/3079856.3080246). Frankly, the exact details of the accelerator is not important, I just wanted to keep things realistic for this tutorial.
+
+This accelerator has three compute units: a systolic array for accelerating matrix multiply operations, a vector unit
 for accelerating SIMD (Single Instruction Multiple Data) operations, and a scalar unit to handle computing offset and moving
 data around. The systolic array is directly connected to three buffers: Buffer A and B (both 256 KB) are for the A and B matrix inputs
 and Buffer C (256 KB) for the output. Buffer C is directly connected to the vector unit to optimize applying activation functions after
