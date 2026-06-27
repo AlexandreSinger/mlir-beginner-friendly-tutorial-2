@@ -13,11 +13,47 @@ TODO: Maybe change the order to put torch-mlir first. It fits more into the them
                 - How can we modify the programming model to make this easier to target from torch-mlir? We can write high-level host-side kernels that do the work for us.
                 - Final demo modfies torch-mlir to use CIFace to emit high-level kernels that allow us to target our device easily and get performance.
 
+Idea: Get people warmed up with Torch-MLIR and remind them of the last tutorial, then describe the hw accel architecture.
+    - Leave as a question for next week: How can we make use of MLIR's infrastructure to program this hw accelerator from PyTorch.
+
 # Demo 0: TBD
 
-TODO: Need to build MLIR and Torch-MLIR for the demos.
+```
+git submodule update --init --recursive
+```
 
-# Demo 1: Programming Hardware Accelerators
+```
+python3 -m venv .venv
+source .venv/bin/activate
+pip install --upgrade pip
+pip install -r requirements.txt
+```
+
+```
+cmake -GNinja -Bbuild \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_C_COMPILER=clang \
+    -DCMAKE_CXX_COMPILER=clang++ \
+    -DLLVM_ENABLE_PROJECTS=mlir \
+    -DLLVM_EXTERNAL_PROJECTS="torch-mlir" \
+    -DLLVM_EXTERNAL_TORCH_MLIR_SOURCE_DIR="$(pwd)/external/torch-mlir" \
+    -DMLIR_ENABLE_BINDINGS_PYTHON=ON \
+    -DTORCH_MLIR_ENABLE_STABLEHLO=ON \
+    -DLLVM_TARGETS_TO_BUILD=host \
+    external/torch-mlir/externals/llvm-project/llvm
+
+cmake --build build --target tools/torch-mlir/all mlir-opt mlir-translate llc mlir_runner_utils mlir_c_runner_utils
+
+export PYTHONPATH="$(pwd)/build/tools/torch-mlir/python_packages/torch_mlir:$PYTHONPATH"
+```
+
+These instructions were graciously donated by Robert Luo from his WaferScapeMapper project: https://github.com/robluo/WaferScapeMapper/tree/main
+
+# Demo 1: Compiling PyTorch Through MLIR Using Torch-MLIR
+
+TODO: Show PyTorch->MLIR->CPU, then try to show targetting a GPU (big feature of MLIR), then ask the question about what to do if I want to target my own hardware accelerator.
+
+# Demo 2: Programming Hardware Accelerators
 
 Although MLIR is an incredibly powerful framework, and can be used to power compiling towards any target, it is not commonly
 used to directly target hardware (to emit assembly instructions). For that, prior frameworks or custom compiler flows are
@@ -25,7 +61,7 @@ still far more popular. Where MLIR is most valuable is in the context of transla
 neural networks) to low-level kernels which are then compiled by a lower-level compiler (such as LLVM). As such, for this
 demo, I want to motivate why MLIR is used for this purpose by applying it to a hypothetical hardware accelerator.
 
-## 1.1 Hypothetical Hardware Accelerator Architecture
+## 2.1 Hypothetical Hardware Accelerator Architecture
 
 There are many hardware accelerator architectures out there, all with different pros and cons, but often as compiler engineers
 we do not get a choice about what the architecture looks like; we leave that to the hardware engineers, although we often beg
@@ -63,7 +99,7 @@ memory is syncronized on the devices. It is far out of scope for this tutorial a
 our compiler, but do be aware that I am hand-waving some of these details away to keep this tutorial approachable. For more
 information, I encourage the reader to look into Heterogeneous Compilation.
 
-## 1.2 Domain-Specific Languages
+## 2.2 Domain-Specific Languages
 
 So, now that we have the architecture details out of the way, lets discuss how we program a system like this. Most often, you will
 not be programming these devices (hardware accelerators) using assembly language. The act of programming these devices are so tedious,
@@ -82,7 +118,7 @@ This examples shows a basic 256x256xf32 matrix multiply kernel. It shows...
 These DSL are often very simple and close to the hardware, such that the compiler is more easily written and directly translates to
 deterministic machine instructions.
 
-## 1.3 Host Kernel Launch Code
+## 2.3 Host Kernel Launch Code
 
 Although this is a very important concept in Heterogeneous Compilation, for this tutorial I will be abstracting away how the host
 actually launches the kernel on the device. In general, this process requires vendor-provided drivers which allow a host program
@@ -97,7 +133,7 @@ Where `kernel_file_path` is a path to the binary file of the compiled kernel (to
 to the arguments of the kernel, res is an allocated pointer to where in memory the result should be stored, and config is a
 configuration struct that contains information on the size and number of args and results.
 
-## 1.4 Full Host and Device Example
+## 2.4 Full Host and Device Example
 
 Putting all of this together, we can create a basic example which will compute a matrix multiply on the system.
 
@@ -167,3 +203,16 @@ this low-level. But users also want performance. So, in order for people to use 
 and yield high-performance; or else they will just buy a GPU instead.
 
 In the following demos, we will discuss how we can still achieve excellent performance while moving up to higher levels of abstraction using PyTorch.
+
+# Demo 3: Picking a Target Level for our Hardware Accelerator
+
+Coming Soon!
+
+<!-- Level 0: Direct hardware intrinsics (no abstraction); Level 1: Higher-level abstraction of hardware; Level 2: Hardware Kernel abstraction; Level 3: Linalg abstraction (dynamic Conv Layer, dynamic FC layer, etc.), Linalg; Level 4: Application abstraction (Pytorch Model). Each level is a dialect which can be translated to a lower level. You choose which level to enter on. Need to show with an example how we can go from level 3 down to level 0. -->
+
+# Demo 4: Modifying Torch-MLIR to Target our Hardware Accelerator
+
+Coming Soon!
+
+<!-- Use Linalg for Level 3. Use CiFace for Level 2 (maybe make simple pass). Assume Level 2 lowering is done in a custom library for simplicity. -->
+
