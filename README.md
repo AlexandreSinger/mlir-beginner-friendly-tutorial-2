@@ -60,7 +60,7 @@ export PYTHONPATH="$(pwd)/build/tools/torch-mlir/python_packages/torch_mlir:$PYT
 ```
 <!-- TODO: Verify if this is true, or if there is an easy repeatable way to do this. -->
 
-These instructions were graciously donated by Robert Luo from his WaferScapeMapper project: https://github.com/robluo/WaferScapeMapper/tree/main
+These instructions were graciously donated by Robert Luo from his WaferScapeMapper project: https://github.com/robluo/WaferScapeMapper
 
 # Demo 1: Compiling PyTorch Through MLIR Using Torch-MLIR
 

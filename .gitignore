@@ -2,3 +2,7 @@
 .venv/
 
 build/
+
+__pycache__
+
+demo1/models_mlir
