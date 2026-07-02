@@ -52,7 +52,8 @@ def tosa_to_linalg(mlir_text: str) -> str:
         "  func.func(tosa-to-linalg),"
         "  func.func(tosa-to-arith),"
         "  func.func(tosa-to-scf),"
-        "  func.func(tosa-to-tensor)"
+        "  func.func(tosa-to-tensor),"
+        "  func.func(canonicalize)"
         ")",
     )
 
@@ -63,7 +64,8 @@ def bufferize(mlir_text: str) -> str:
         mlir_text,
         "--pass-pipeline=builtin.module("
         "  one-shot-bufferize{bufferize-function-boundaries=true},"
-        "  func.func(buffer-deallocation-pipeline)"
+        "  func.func(buffer-deallocation-pipeline),"
+        "  func.func(canonicalize)"
         ")",
     )
 
