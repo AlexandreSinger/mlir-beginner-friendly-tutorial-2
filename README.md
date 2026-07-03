@@ -7,16 +7,14 @@ Although the first tutorial is not required to follow along with this tutorial, 
 prior tutorial before this one. The key things from the last tutorial you will need is how to read MLIR's Intermediate Representation
 and what multi-level means in the context of MLIR and how different levels are lowered in the MLIR framework.
 
-TODO: Maybe change the order to put torch-mlir first. It fits more into the them of the tutorial and makes serves as a better hook.
-        Story: Torch-mlir is an entry point into MLIR, people like to use it, it can be used to target CPUs, but now I want to target an accelerator
-                - What does my accelerator look like and how is it usually programmed. It sucks to program in, id rather use PyTorch, but I do not want to lose performance.
-                - How can we modify the programming model to make this easier to target from torch-mlir? We can write high-level host-side kernels that do the work for us.
-                - Final demo modfies torch-mlir to use CIFace to emit high-level kernels that allow us to target our device easily and get performance.
+In the first tutorial, I motivated MLIR by creating a hypothetical C++ library and showing that we can leverage higher levels of abstractions to optimize the code better for targetting CPUs. In this tutorial, I wanted to go a step further and discuss another very common (maybe even the most common) use-case for MLIR: using high-level information to target domain-specific accelerators. The figure below provides an overview of the tutorial:
+![Tutorial Overview](resources/Tutorial_Overview.png)
 
-Idea: Get people warmed up with Torch-MLIR and remind them of the last tutorial, then describe the hw accel architecture.
-    - Leave as a question for next week: How can we make use of MLIR's infrastructure to program this hw accelerator from PyTorch.
+We will be describing a hypothetical hardware accelerator architecture (based on real accelerator architectures) and its programming model, and then show different techniques on how we can lower high-level graph abstractions into kernels that are run on the accelerator.
 
-# Demo 0: TBD
+This is not intended to be a tutorial on best-practices for hardware accelerators, or frankly even how to write a good compiler for hardware accelerators; my goal in this tutorial is to teach you how you should approach writing a compiler for hardware accelerator. The best compiler infrastructure depends on the architecture you are targeting and how much time you have to invest on building it.
+
+# Demo 0: Building Torch-MLIR
 
 In this repository, you will find a Git submodule of torch-mlir. This was a recent version of torch-mlir that was available when I wrote this tutorial. There is nothing special about it, I just verified that it worked on the code in this tutorial, so I provide it here such that the results of the tutorial will always match in the future. Make sure you have initialized the submodule using:
 ```
@@ -64,7 +62,170 @@ These instructions were graciously donated by Robert Luo from his WaferScapeMapp
 
 # Demo 1: Compiling PyTorch Through MLIR Using Torch-MLIR
 
-TODO: Show PyTorch->MLIR->CPU, then try to show targetting a GPU (big feature of MLIR), then ask the question about what to do if I want to target my own hardware accelerator.
+In the last tutorial, we defined our own CPP library that a user may write in and then converted it directly to MLIR. This was convenient since the library we wrote perfectly matched MLIR's Linalg dialect. A snippet of the user code for a fully-connected layer is copied below:
+```cpp
+int main(void) {
+    Tensor<float, 256, 512> FC_INPUT;
+    Tensor<float, 512, 1024> FC_WEIGHT;
+    Tensor<float, 256, 1024> FC_OUTPUT = matmul(FC_INPUT, FC_WEIGHT);
+    Tensor<float, 256, 1024> OUT = relu(FC_OUTPUT);
+}
+```
+
+The issue is that people do not want to write in some custom frontend language. People will not be familiar with how to use it to get excellent performance and will likely avoid writing code in a language that they are not familiar with. If you are a chip designer, this is a major issue: you may have created a perfect chip with a programming interface that can achieve incredible performance, but if nobody can actually write in that language your chip will not sell. Our goal is to use a very popular programming interface as our frontend. This will give the highest likelihood of your user being able to use your chips and achieve excellent performance.
+
+In this tutorial, we will be targeting an AI hardware accelerator. One of the most popular frontends for AI is PyTorch. Here is the same fully-connected layer written in PyTorch:
+```py
+import torch
+import torch.nn as nn
+
+
+class FullyConnected(nn.Module):
+    def __init__(self, in_features: int = 512, hidden: int = 1024):
+        super().__init__()
+        self.layers = nn.Sequential(
+            nn.Linear(in_features, hidden),
+            nn.ReLU(),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.layers(x)
+
+    def inputs(self, batch_size: int = 256) -> tuple:
+        return (torch.randn(batch_size, self.layers[0].in_features),)
+```
+Although this looks like more code that the custom library, it uses known PyTorch constructs that people are familiar with. Another major advantage of using PyTorch is code reuse. People can take the same model and target different machines. This lowers the barrier to using your chip even more.
+
+In the rest of this demo, we will be writing a compiler that will lower PyTorch models, through MLIR's Linalg dialect (the same dialect we used in the last tutorial), down to CPU that can be executed on your computer. We will then show how easy it is to then rework our lowering pipeline to target GPUs as well.
+
+The code for this demo can be found in the `demo1` folder. This code was borrowed from [Robert's Waferscape Project](https://github.com/robluo/WaferScapeMapper); which provides an MLIR pipeline for compiling PyTorch models targetting CPUs. I have made some small modifications to make the tutorial easier to follow. You can run the full demo using the following:
+```
+source .venv/bin/activate
+
+export PYTHONPATH="$(pwd)/build/tools/torch-mlir/python_packages/torch_mlir:$PYTHONPATH"
+
+python3 demo1/run.py
+```
+
+This will run the full compilation pipeline and run the compiled result on your machine. It compares the result of the compilation with the regular PyTorch flow to ensure that they get the same result. The intermediate MLIR layers are written out to files in the `demo1/models_mlir` directory.
+
+## 1.1: Using Torch-MLIR to Enter MLIR from PyTorch
+
+Since MLIR provides an extensible infrastructure, many people have defined their own dialects for different applications. Fortunately, many people are writing compilers that use PyTorch as a frontend; so a PyTorch dialect already exists from the [torch-mlir project](https://github.com/llvm/torch-mlir). The Torch-MLIR project provides a PyTorch dialect, which is used to express a high-level PyTorch model in MLIR, and conversion passes to lower the PyTorch Dialect into MLIR's built-in dialects. This tutorial will not go into details on how torch-MLIR works, but we will be using it to lower our fully-connected example above.
+
+We start by using Torch-MLIR to export the PyTorch graph to the `torch` dialect. The Python code to do this can be found in `demo1/frontend.py`. This file uses Torch-MLIR's `torch.export` method to lower the model. The file contains some other oddities that handle lowering special operations and handle buffers easier; this frontend was borrowed from [Robert's Waferscape Project](https://github.com/robluo/WaferScapeMapper) which was designed to lower much more interesting models.
+
+One interesting thing about the frontend that I want to point out is that in order to export the model into MLIR, you need to provide an example input. This is required because Python (and by extension PyTorch) is a JIT dynamic language, so the model does not have enough information about the size of the input tensors (the tensor size is not known until run time). By providing example inputs, we can use fixed-size tensors in the MLIR code. If we did not provide this, the tensors would have dynamic shape, which are harder to optimize.
+
+This produces the following `torch` dialect code in MLIR:
+```mlir
+module {
+  func.func @main(%arg0: !torch.vtensor<[256,512],f32>) -> !torch.vtensor<[256,1024],f32> {
+    %0 = torch.vtensor.literal(dense_resource<torch_tensor_1024_512_torch.float32> : tensor<1024x512xf32>) : !torch.vtensor<[1024,512],f32>
+    %1 = torch.vtensor.literal(dense_resource<torch_tensor_1024_torch.float32> : tensor<1024xf32>) : !torch.vtensor<[1024],f32>
+    %2 = torch.aten.linear %arg0, %0, %1 : !torch.vtensor<[256,512],f32>, !torch.vtensor<[1024,512],f32>, !torch.vtensor<[1024],f32> -> !torch.vtensor<[256,1024],f32>
+    %3 = torch.aten.relu %2 : !torch.vtensor<[256,1024],f32> -> !torch.vtensor<[256,1024],f32>
+    return %3 : !torch.vtensor<[256,1024],f32>
+  }
+}
+
+{-#
+  dialect_resources: {
+    builtin: {
+      torch_tensor_1024_512_torch.float32: "...",
+      torch_tensor_1024_torch.float32: "..."
+    }
+  }
+#-}
+```
+You will notice that this is basically the same information as our PyTorch model, just expressed in MLIR.
+
+NOTE: The dialect resources contain the raw data for the weight matrices directly in the MLIR code. This is not common, often it is a pointer; but for this particular lowering pipeline it was convenient to have these directly.
+
+In its current form, this MLIR code is basically a one-to-one mapping of the PyTorch model, but our goal is to move into more generic dialects so we can perform the optimizations we talked about last tutorial, as well as target different devices.
+
+## 1.2 Lowering the Torch Dialect
+
+We will now lower the PyTorch code to LLVM using a similar technique to the last tutorial. We will be using Python for this lowering instead of Bash since it is just more convenient for torch dialect code; but it is the same process as before. The code for lowering the torch dialect can be found in `demo1/pipeline.py`. An overview of the lowering process is shown here:
+
+![Torch Dialect Lowering Diagram](resources/LoweringDialectDiagram.png)
+
+The bottom part of this figure (from Linalg on Tensor down to Host/Device Code) is identical to the lowering I showed in the first tutorial. This is the major advantage of MLIR: we are able to reuse our lowering code from another project without issue. The new lowering is at the top.
+
+We lower the `torch` dialect using TorchDynamo to lower to the `torch-backend` dialect (not shown) and then lower it ot the TOSA dialect from there. This is a common technique to use an intermediate dialect to make the lowering easier. The TOSA dialect is very similar to the Linalg dialect from before, but it is following the [TOSA specification](https://www.mlplatform.org/tosa/tosa_spec.html). The TOSA code for the fully-connected layer is shown below:
+```mlir
+module {
+  func.func @main(%arg0: tensor<256x512xf32>) -> tensor<256x1024xf32> {
+    %0 = "tosa.const"() <{values = dense_resource<torch_tensor_1024_torch.float32> : tensor<1024xf32>}> : () -> tensor<1024xf32>
+    %1 = "tosa.const"() <{values = dense<0.000000e+00> : tensor<1xf32>}> : () -> tensor<1xf32>
+    %2 = tosa.const_shape  {values = dense<[1, 256, 512]> : tensor<3xindex>} : () -> !tosa.shape<3>
+    %3 = tosa.const_shape  {values = dense<[256, 1024]> : tensor<2xindex>} : () -> !tosa.shape<2>
+    %4 = tosa.const_shape  {values = dense<[1, 1024]> : tensor<2xindex>} : () -> !tosa.shape<2>
+    %5 = "tosa.const"() <{values = dense<"..."> : tensor<1x512x1024xf32>}> : () -> tensor<1x512x1024xf32>
+    %6 = tosa.reshape %arg0, %2 : (tensor<256x512xf32>, !tosa.shape<3>) -> tensor<1x256x512xf32>
+    %7 = tosa.matmul %6, %5, %1, %1 : (tensor<1x256x512xf32>, tensor<1x512x1024xf32>, tensor<1xf32>, tensor<1xf32>) -> tensor<1x256x1024xf32>
+    %8 = tosa.reshape %7, %3 : (tensor<1x256x1024xf32>, !tosa.shape<2>) -> tensor<256x1024xf32>
+    %9 = tosa.reshape %0, %4 : (tensor<1024xf32>, !tosa.shape<2>) -> tensor<1x1024xf32>
+    %10 = tosa.add %8, %9 : (tensor<256x1024xf32>, tensor<1x1024xf32>) -> tensor<256x1024xf32>
+    %11 = tosa.clamp %10 {max_val = 3.40282347E+38 : f32, min_val = 0.000000e+00 : f32} : (tensor<256x1024xf32>) -> tensor<256x1024xf32>
+    return %11 : tensor<256x1024xf32>
+  }
+}
+
+{-#
+  dialect_resources: {
+    builtin: {
+      torch_tensor_1024_torch.float32: "..."
+    }
+  }
+#-}
+```
+
+Now that we are in the TOSA dialect, we are now in the built-in dialects of MLIR. The lowering will look identical to the first tutorial. We start by lowering the TOSA dialect to the Linalg dialect. This produces the following code:
+```mlir
+#map = affine_map<(d0, d1) -> (d0, d1)>
+#map1 = affine_map<(d0, d1) -> (0, d1)>
+module {
+  func.func @main(%arg0: tensor<256x512xf32>) -> tensor<256x1024xf32> {
+    %cst = arith.constant 3.40282347E+38 : f32
+    %cst_0 = arith.constant 0.000000e+00 : f32
+    %cst_1 = arith.constant dense_resource<torch_tensor_1024_torch.float32> : tensor<1024xf32>
+    %cst_2 = arith.constant dense<"..."> : tensor<1x512x1024xf32>
+    %expanded = tensor.expand_shape %arg0 [[0, 1], [2]] output_shape [1, 256, 512] : tensor<256x512xf32> into tensor<1x256x512xf32>
+    %0 = tensor.empty() : tensor<1x256x1024xf32>
+    %1 = linalg.fill ins(%cst_0 : f32) outs(%0 : tensor<1x256x1024xf32>) -> tensor<1x256x1024xf32>
+    %2 = linalg.batch_matmul ins(%expanded, %cst_2 : tensor<1x256x512xf32>, tensor<1x512x1024xf32>) outs(%1 : tensor<1x256x1024xf32>) -> tensor<1x256x1024xf32>
+    %collapsed = tensor.collapse_shape %2 [[0, 1], [2]] : tensor<1x256x1024xf32> into tensor<256x1024xf32>
+    %expanded_3 = tensor.expand_shape %cst_1 [[0, 1]] output_shape [1, 1024] : tensor<1024xf32> into tensor<1x1024xf32>
+    %3 = tensor.empty() : tensor<256x1024xf32>
+    %4 = linalg.generic {indexing_maps = [#map, #map1, #map], iterator_types = ["parallel", "parallel"]} ins(%collapsed, %expanded_3 : tensor<256x1024xf32>, tensor<1x1024xf32>) outs(%3 : tensor<256x1024xf32>) {
+    ^bb0(%in: f32, %in_4: f32, %out: f32):
+      %7 = arith.addf %in, %in_4 : f32
+      linalg.yield %7 : f32
+    } -> tensor<256x1024xf32>
+    %5 = tensor.empty() : tensor<256x1024xf32>
+    %6 = linalg.generic {indexing_maps = [#map, #map], iterator_types = ["parallel", "parallel"]} ins(%4 : tensor<256x1024xf32>) outs(%5 : tensor<256x1024xf32>) {
+    ^bb0(%in: f32, %out: f32):
+      %7 = arith.minimumf %in, %cst : f32
+      %8 = arith.maximumf %7, %cst_0 : f32
+      linalg.yield %8 : f32
+    } -> tensor<256x1024xf32>
+    return %6 : tensor<256x1024xf32>
+  }
+}
+
+{-#
+  dialect_resources: {
+    builtin: {
+      torch_tensor_1024_torch.float32: "..."
+    }
+  }
+#-}
+```
+
+We can now see a familiar kernel that performs a matrix multiply (in this case it is in a batched form), a linalg.generic used to add the bias, and then another linalg.generic to perform a ReLU (implemented as a clamp).
+
+The rest of the lowering brings the code down to the LLVM dialect, and then uses LLVM to compile the code into a `.so` which can be executed on your machine.
 
 # Demo 2: Programming Hardware Accelerators
 

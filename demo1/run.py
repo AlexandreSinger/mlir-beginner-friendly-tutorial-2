@@ -12,6 +12,7 @@ from pipeline import (
 )
 from runner import MLIRRunner, PyTorchRunner, compare
 from mlp import SampleMLP
+from fully_connected_layer import FullyConnected
 
 OUTPUT_ROOT = Path(__file__).parent / "models_mlir"
 NUM_TEST_INPUTS = 5
@@ -28,8 +29,9 @@ def make_random_inputs(example_inputs: tuple) -> list[torch.Tensor]:
     return result
 
 
-BATCH_SIZE = 8
+BATCH_SIZE = 256
 mlp   = SampleMLP()
+fc_layer = FullyConnected()
 # conv  = SampleConv()
 # rn18  = ResNet18Wrapper(pretrained=False)
 # rn50  = ResNet50Wrapper(pretrained=False)
@@ -38,6 +40,7 @@ mlp   = SampleMLP()
 
 models = {
     "mlp":              (mlp,              mlp.inputs(BATCH_SIZE)),
+    "fc_layer":         (fc_layer,         fc_layer.inputs(BATCH_SIZE)),
     # "conv":             (conv,             conv.inputs(BATCH_SIZE)),
     # "resnet18":         (rn18,             rn18.inputs(BATCH_SIZE)),
     # "resnet50":         (rn50,             rn50.inputs(BATCH_SIZE)),
