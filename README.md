@@ -229,11 +229,11 @@ The rest of the lowering brings the code down to the LLVM dialect, and then uses
 
 # Demo 2: Programming Hardware Accelerators
 
-Although MLIR is an incredibly powerful framework, and can be used to power compiling towards any target, it is not commonly
+As shown in the last demo, although MLIR is an incredibly powerful framework, and can be used to power compiling towards any target, it is not commonly
 used to directly target hardware (to emit assembly instructions). For that, prior frameworks or custom compiler flows are
 still far more popular. Where MLIR is most valuable is in the context of translating high-level compute graphs (such as
 neural networks) to low-level kernels which are then compiled by a lower-level compiler (such as LLVM). As such, for this
-demo, I want to motivate why MLIR is used for this purpose by applying it to a hypothetical hardware accelerator.
+tutorial, I want to motivate why MLIR is used for this purpose by applying it to a hypothetical hardware accelerator. To do that, we need to fully understand the architecture we are planning to target and how to program it.
 
 ## 2.1 Hypothetical Hardware Accelerator Architecture
 
@@ -242,13 +242,12 @@ we do not get a choice about what the architecture looks like; we leave that to 
 them not to make our lives too difficult. So we are going to assume that the hardware accelerator we are going to be targetting
 will look something like the figure below:
 
-TODO: Add figure of hardware accelerator.
+![Hardware Accelerator Architecture](resources/BasicAcceleratorArchitecture.png)
 
 This hardware accelerator architecture is based on the [Huawei DaVinci AI chip](https://doi.org/10.1016/j.jpdc.2023.01.008) that I used to work with, but I have simplified it slightly for brevity (and obfuscated a few things). The architecture is made of publically available information on the DaVinci chip, where I filled in some gaps using the [Google TPU architecture](https://doi-org.myaccess.library.utoronto.ca/10.1145/3079856.3080246). Frankly, the exact details of the accelerator is not important, I just wanted to keep things realistic for this tutorial.
 
-This accelerator has three compute units: a systolic array for accelerating matrix multiply operations, a vector unit
-for accelerating SIMD (Single Instruction Multiple Data) operations, and a scalar unit to handle computing offset and moving
-data around. The systolic array is directly connected to three buffers: Buffer A and B (both 256 KB) are for the A and B matrix inputs
+This accelerator has three compute units (shown in green): a systolic array for accelerating matrix multiply operations, a vector unit
+for accelerating SIMD (Single Instruction Multiple Data) operations, and a scalar unit to handle computing offsets scalar operations. The systolic array is directly connected to three buffers (shown in blue): Buffer A and B (both 256 KB) are for the A and B matrix inputs
 and Buffer C (256 KB) for the output. Buffer C is directly connected to the vector unit to optimize applying activation functions after
 performing a matrix multiply. The vector and scalar units are connected to a 24 MB UB (Unified Buffer). Connected to the accelerator is an 8
 GB L1 cache which holds the input and outputs transferred to and from the host computer. A DMA (Direct Memory Access) controller is
@@ -256,7 +255,7 @@ used to move memory between the different buffers (for example moving data from 
 
 The overall system is shown below:
 
-TODO: Add a figure of the system bus and how it connects the host computer to the L2 cache and the hardware accelerator.
+![System Bus Including Hardware Accelerator](resources/ExampleSystemBus.png)
 
 This basic system consists of a host computer (imagine you PC or laptop CPU), connected to a large 64 GB L2 cache and the hardware accelerator
 through a bus. This bus allows the host computer to "launch kernels" on the hardware accelerator by passing the kernel instructions and kerenl
@@ -284,14 +283,26 @@ a matrix multiply between two matrices or copy data from one buffer to another. 
 to program on the device.
 
 This process of making a low-level language to comminicate more directly with a specific hardware-accelerator is sometimes called a
-Domain-Specific Language (DSL). An example of a DSL for my example hardware accelerator is shown below:
+Domain-Specific Language (DSL).
 
-TODO: Add an example of a 256x256 matrix multiply kernel.
+For example, there may be instructions for copying data using the DMA unit from/to each type of buffer:
+```cpp
+__dma_L1_to_ub(void* dest_ptr, void* src_ptr, uint32_t num_elems);
+__dma_ub_to_buffer_a(void* dest_ptr, void* src_ptr, uint32_t num_elems);
+__dma_ub_to_buffer_b(void* dest_ptr, void* src_ptr, uint32_t num_elems);
+__dma_buffer_c_to_ub(void* dest_ptr, void* src_ptr, uint32_t num_elems);
+__dma_ub_to_L1(void* dest_ptr, void* src_ptr, uint32_t num_elems);
+```
 
-This examples shows a basic 256x256xf32 matrix multiply kernel. It shows...
+There may also be instructions for performing operations, such as matmul or vector operations:
+```cpp
+__matmul(void* dest_ptr, void* a_ptr, void* b_ptr, uint32_t config);
+__vec_add(void* dest_ptr, void* a_ptr, void* b_ptr, uint32_t config);
+```
+Note that these pointers are pointers to their respective buffers. For example, `a_ptr` and `b_ptr` for the matmul will be in Buff A and B, however for the vec_add they would be in the UB. It is on the programmer to ensure that the data is located in the correct buffers at valid locations.
 
 These DSL are often very simple and close to the hardware, such that the compiler is more easily written and directly translates to
-deterministic machine instructions.
+deterministic machine instructions, but tend to be extremely hard for humans to program.
 
 ## 2.3 Host Kernel Launch Code
 
@@ -315,18 +326,33 @@ Putting all of this together, we can create a basic example which will compute a
 Let's start with the device code, and call it `matmul_256_256_f32_kernel.c`:
 ```c
 void matmul_256_256_f32_kernel(float* c, float* a, float* b) {
-    // Create a pointers to the bottom of Buffers A, B, and C as target addresses.
+    // We assume that a, b, and c are in the L1 buffer.
+
+    // start by creating pointers in the UB to accomodate the data.
     // NOTE: In this architecture, we are assuming that we manage our own memory. This is not always the case.
+    float* a_ub_ptr = (float*)(0);
+    float* b_ub_ptr = (float*)(162144);
+    float* c_ub_ptr = (float*)(324288);
+
+    // Create a pointers to the bottom of Buffers A, B, and C as target addresses.
     float* buf_a_ptr = (float *)(0);
     float* buf_b_ptr = (float *)(0);
     float* buf_c_ptr = (float *)(0);
 
+    // Then move the data from the L1 buffer to the UB.
     // Copy 162,144 bytes (256x256 f32 elements) for each input.
-    __dma_L1_to_buffer_a(buf_a_ptr, a, 162144);
-    __dma_L1_to_buffer_b(buf_b_ptr, b, 162144);
+    __dma_L1_to_ub(a_ub_ptr, a, 162144);
+    __dma_L1_to_ub(b_ub_ptr, b, 162144);
 
     // Syncronize the memory. Often these operations are asyncronous to allow multiple DMAs to happen in parallel,
-    // here we wait for them to finish before starting the matmul.
+    // here we wait for them to finish before starting the next copy.
+    __sync_mem();
+
+    // Then copy the data from the UB to the a and b buffers.
+    __dma_L1_to_buffer_a(buf_a_ptr, a_ub_ptr, 162144);
+    __dma_L1_to_buffer_b(buf_b_ptr, b_ub_ptr, 162144);
+
+    // Sync again before starting the matmul.
     __sync_mem();
 
     // Perform the matrix multiply and store the result in buf_c_ptr.
@@ -338,7 +364,9 @@ void matmul_256_256_f32_kernel(float* c, float* a, float* b) {
     __sync_systolic_array();
 
     // Copy the result out into L1.
-    __dma_buffer_c_to_L1(c, buf_c_ptr, 162144);
+    __dma_buffer_c_to_ub(c_ub_ptr, buf_c_ptr, 162144);
+    __sync_mem();
+    __dma_ub_to_L1(c, c_ub_ptr, 162144);
 
     // Syncronize the memory before completing.
     __sync_mem();
