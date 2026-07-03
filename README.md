@@ -4,15 +4,14 @@ This is a continuation of my last beginner-friendly tutorial on MLIR, found on G
 
 I wanted to build on my previous tutorial by discussing how MLIR is used in the context of programming hardware accelerators.
 Although the first tutorial is not required to follow along with this tutorial, it is recommended that you watch / read the
-prior tutorial before this one. The key things from the last tutorial you will need is how to read MLIR's Intermediate Representation
-and what multi-level means in the context of MLIR and how different levels are lowered in the MLIR framework.
+prior tutorial before this one. The key things from the last tutorial you will need are how to read MLIR's Intermediate Representation, what multi-level means in the context of MLIR, and how different levels are lowered in the MLIR framework.
 
-In the first tutorial, I motivated MLIR by creating a hypothetical C++ library and showing that we can leverage higher levels of abstractions to optimize the code better for targetting CPUs. In this tutorial, I wanted to go a step further and discuss another very common (maybe even the most common) use-case for MLIR: using high-level information to target domain-specific accelerators. The figure below provides an overview of the tutorial:
+In the first tutorial, I motivated MLIR by creating a hypothetical C++ library and showing that we can leverage higher levels of abstractions to optimize the code better for targeting CPUs. In this tutorial, I wanted to go a step further and discuss another very common (maybe even the most common) use-case for MLIR: using high-level information to target domain-specific accelerators. The figure below provides an overview of the tutorial:
 ![Tutorial Overview](resources/Tutorial_Overview.png)
 
 We will be describing a hypothetical hardware accelerator architecture (based on real accelerator architectures) and its programming model, and then show different techniques on how we can lower high-level graph abstractions into kernels that are run on the accelerator.
 
-This is not intended to be a tutorial on best-practices for hardware accelerators, or frankly even how to write a good compiler for hardware accelerators; my goal in this tutorial is to teach you how you should approach writing a compiler for hardware accelerator. The best compiler infrastructure depends on the architecture you are targeting and how much time you have to invest on building it.
+This is not intended to be a tutorial on best-practices for hardware accelerators, or frankly even how to write a good compiler for hardware accelerators; my goal in this tutorial is to teach you how you should approach writing a compiler for a hardware accelerator. The best compiler infrastructure depends on the architecture you are targeting and how much time you have to invest on building it.
 
 # Demo 0: Building Torch-MLIR
 
@@ -72,7 +71,7 @@ int main(void) {
 }
 ```
 
-The issue is that people do not want to write in some custom frontend language. People will not be familiar with how to use it to get excellent performance and will likely avoid writing code in a language that they are not familiar with. If you are a chip designer, this is a major issue: you may have created a perfect chip with a programming interface that can achieve incredible performance, but if nobody can actually write in that language your chip will not sell. Our goal is to use a very popular programming interface as our frontend. This will give the highest likelihood of your user being able to use your chips and achieve excellent performance.
+The issue is that people do not want to write in some custom frontend language. People will not be familiar with how to use it to get excellent performance and will likely avoid writing code in a language that they are not familiar with. If you are a chip designer, this is a major issue: you may have created a perfect chip with a programming interface that can achieve incredible performance, but if nobody can actually write in that language your chip will not sell. Our goal is to use a very popular programming interface as our frontend. This will give the highest likelihood of your users being able to use your chips and achieve excellent performance.
 
 In this tutorial, we will be targeting an AI hardware accelerator. One of the most popular frontends for AI is PyTorch. Here is the same fully-connected layer written in PyTorch:
 ```py
@@ -94,11 +93,11 @@ class FullyConnected(nn.Module):
     def inputs(self, batch_size: int = 256) -> tuple:
         return (torch.randn(batch_size, self.layers[0].in_features),)
 ```
-Although this looks like more code that the custom library, it uses known PyTorch constructs that people are familiar with. Another major advantage of using PyTorch is code reuse. People can take the same model and target different machines. This lowers the barrier to using your chip even more.
+Although this looks like more code than the custom library, it uses known PyTorch constructs that people are familiar with. Another major advantage of using PyTorch is code reuse. People can take the same model and target different machines. This lowers the barrier to using your chip even more.
 
-In the rest of this demo, we will be writing a compiler that will lower PyTorch models, through MLIR's Linalg dialect (the same dialect we used in the last tutorial), down to CPU that can be executed on your computer. We will then show how easy it is to then rework our lowering pipeline to target GPUs as well.
+In the rest of this demo, we will be writing a compiler that will lower PyTorch models, through MLIR's Linalg dialect (the same dialect we used in the last tutorial), down to code that can be executed on the CPU of your computer.
 
-The code for this demo can be found in the `demo1` folder. This code was borrowed from [Robert's Waferscape Project](https://github.com/robluo/WaferScapeMapper); which provides an MLIR pipeline for compiling PyTorch models targetting CPUs. I have made some small modifications to make the tutorial easier to follow. You can run the full demo using the following:
+The code for this demo can be found in the `demo1` folder. This code was borrowed from [Robert's Waferscape Project](https://github.com/robluo/WaferScapeMapper); which provides an MLIR pipeline for compiling PyTorch models targeting CPUs. I have made some small modifications to make the tutorial easier to follow. You can run the full demo using the following:
 ```
 source .venv/bin/activate
 
@@ -113,7 +112,7 @@ This will run the full compilation pipeline and run the compiled result on your 
 
 Since MLIR provides an extensible infrastructure, many people have defined their own dialects for different applications. Fortunately, many people are writing compilers that use PyTorch as a frontend; so a PyTorch dialect already exists from the [torch-mlir project](https://github.com/llvm/torch-mlir). The Torch-MLIR project provides a PyTorch dialect, which is used to express a high-level PyTorch model in MLIR, and conversion passes to lower the PyTorch Dialect into MLIR's built-in dialects. This tutorial will not go into details on how torch-MLIR works, but we will be using it to lower our fully-connected example above.
 
-We start by using Torch-MLIR to export the PyTorch graph to the `torch` dialect. The Python code to do this can be found in `demo1/frontend.py`. This file uses Torch-MLIR's `torch.export` method to lower the model. The file contains some other oddities that handle lowering special operations and handle buffers easier; this frontend was borrowed from [Robert's Waferscape Project](https://github.com/robluo/WaferScapeMapper) which was designed to lower much more interesting models.
+We start by using Torch-MLIR to export the PyTorch graph to the `torch` dialect. The Python code to do this can be found in `demo1/frontend.py`. This file uses Torch-MLIR's `torch.export` method to lower the model. The file contains some other oddities that handle lowering special operations and handle buffers more easily; this frontend was borrowed from [Robert's Waferscape Project](https://github.com/robluo/WaferScapeMapper) which was designed to lower much more interesting models.
 
 One interesting thing about the frontend that I want to point out is that in order to export the model into MLIR, you need to provide an example input. This is required because Python (and by extension PyTorch) is a JIT dynamic language, so the model does not have enough information about the size of the input tensors (the tensor size is not known until run time). By providing example inputs, we can use fixed-size tensors in the MLIR code. If we did not provide this, the tensors would have dynamic shape, which are harder to optimize.
 
@@ -140,7 +139,7 @@ module {
 ```
 You will notice that this is basically the same information as our PyTorch model, just expressed in MLIR.
 
-NOTE: The dialect resources contain the raw data for the weight matrices directly in the MLIR code. This is not common, often it is a pointer; but for this particular lowering pipeline it was convenient to have these directly.
+NOTE: The dialect resources contain the raw data for the weight matrices directly in the MLIR code. This may not be common; but for this particular lowering pipeline it was convenient to have the tensor data directly.
 
 In its current form, this MLIR code is basically a one-to-one mapping of the PyTorch model, but our goal is to move into more generic dialects so we can perform the optimizations we talked about last tutorial, as well as target different devices.
 
@@ -152,7 +151,7 @@ We will now lower the PyTorch code to LLVM using a similar technique to the last
 
 The bottom part of this figure (from Linalg on Tensor down to Host/Device Code) is identical to the lowering I showed in the first tutorial. This is the major advantage of MLIR: we are able to reuse our lowering code from another project without issue. The new lowering is at the top.
 
-We lower the `torch` dialect using TorchDynamo to lower to the `torch-backend` dialect (not shown) and then lower it ot the TOSA dialect from there. This is a common technique to use an intermediate dialect to make the lowering easier. The TOSA dialect is very similar to the Linalg dialect from before, but it is following the [TOSA specification](https://www.mlplatform.org/tosa/tosa_spec.html). The TOSA code for the fully-connected layer is shown below:
+We lower the `torch` dialect using TorchDynamo to lower to the `torch-backend` dialect (not shown) and then lower it to the TOSA dialect from there. This is a common technique to use an intermediate dialect to make the lowering easier. The TOSA dialect is very similar to the Linalg dialect from before, but it is following the [TOSA specification](https://www.mlplatform.org/tosa/tosa_spec.html). The TOSA code for the fully-connected layer is shown below:
 ```mlir
 module {
   func.func @main(%arg0: tensor<256x512xf32>) -> tensor<256x1024xf32> {
@@ -239,27 +238,27 @@ tutorial, I want to motivate why MLIR is used for this purpose by applying it to
 
 There are many hardware accelerator architectures out there, all with different pros and cons, but often as compiler engineers
 we do not get a choice about what the architecture looks like; we leave that to the hardware engineers, although we often beg
-them not to make our lives too difficult. So we are going to assume that the hardware accelerator we are going to be targetting
+them not to make our lives too difficult. So we are going to assume that the hardware accelerator we are going to be targeting
 will look something like the figure below:
 
 ![Hardware Accelerator Architecture](resources/BasicAcceleratorArchitecture.png)
 
-This hardware accelerator architecture is based on the [Huawei DaVinci AI chip](https://doi.org/10.1016/j.jpdc.2023.01.008) that I used to work with, but I have simplified it slightly for brevity (and obfuscated a few things). The architecture is made of publically available information on the DaVinci chip, where I filled in some gaps using the [Google TPU architecture](https://doi-org.myaccess.library.utoronto.ca/10.1145/3079856.3080246). Frankly, the exact details of the accelerator is not important, I just wanted to keep things realistic for this tutorial.
+This hardware accelerator architecture is based on the [Huawei DaVinci AI chip](https://doi.org/10.1016/j.jpdc.2023.01.008) that I used to work with, but I have simplified it slightly for brevity (and obfuscated a few things). The architecture is made up of publicly available information on the DaVinci chip, where I filled in some gaps using the [Google TPU architecture](https://doi-org.myaccess.library.utoronto.ca/10.1145/3079856.3080246). Frankly, the exact details of the accelerator are not important, I just wanted to keep things realistic for this tutorial.
 
 This accelerator has three compute units (shown in green): a systolic array for accelerating matrix multiply operations, a vector unit
-for accelerating SIMD (Single Instruction Multiple Data) operations, and a scalar unit to handle computing offsets scalar operations. The systolic array is directly connected to three buffers (shown in blue): Buffer A and B (both 256 KB) are for the A and B matrix inputs
+for accelerating SIMD (Single Instruction Multiple Data) operations, and a scalar unit to handle computing offsets and scalar operations. The systolic array is directly connected to three buffers (shown in blue): Buffer A and B (both 256 KB) are for the A and B matrix inputs
 and Buffer C (256 KB) for the output. Buffer C is directly connected to the vector unit to optimize applying activation functions after
 performing a matrix multiply. The vector and scalar units are connected to a 24 MB UB (Unified Buffer). Connected to the accelerator is an 8
-GB L1 cache which holds the input and outputs transferred to and from the host computer. A DMA (Direct Memory Access) controller is
+GB L1 cache which holds the inputs and outputs transferred to and from the host computer. A DMA (Direct Memory Access) controller is
 used to move memory between the different buffers (for example moving data from the L1 to the UB, UB to Buffer A, etc.).
 
 The overall system is shown below:
 
 ![System Bus Including Hardware Accelerator](resources/ExampleSystemBus.png)
 
-This basic system consists of a host computer (imagine you PC or laptop CPU), connected to a large 64 GB L2 cache and the hardware accelerator
-through a bus. This bus allows the host computer to "launch kernels" on the hardware accelerator by passing the kernel instructions and kerenl
-input data to the accelerator and reading the output data after the kernel completes..
+This basic system consists of a host computer (imagine your PC or laptop CPU), connected to a large 64 GB L2 cache and the hardware accelerator
+through a bus. This bus allows the host computer to "launch kernels" on the hardware accelerator by passing the kernel instructions and kernel
+input data to the accelerator and reading the output data after the kernel completes.
 In the context of this tutorial, a kernel is a set of instructions which are executed by the hardware accelerators.
 
 As a worked example of the overall system, suppose the host computer was running a program and the program wanted to accelerate a matrix multiply
@@ -268,21 +267,21 @@ kernel on the device. The host would then wait for the kernel to complete and co
 the hardware accelerator would perform DMA operations to move the matrix operands from the L1 cache into Buffer A and Buffer B, compute the
 matrix multiply, copy the result from Buffer C to the UB, and then finally copy the result from UB to the L1 cache.
 
-For this tutorial, we will largely be ignoring the complixities of how the host CPU and device communicate as well as how
-memory is syncronized on the devices. It is far out of scope for this tutorial and should not change the overall design of
+For this tutorial, we will largely be ignoring the complexities of how the host CPU and device communicate as well as how
+memory is synchronized on the devices. It is far out of scope for this tutorial and should not change the overall design of
 our compiler, but do be aware that I am hand-waving some of these details away to keep this tutorial approachable. For more
 information, I encourage the reader to look into Heterogeneous Compilation.
 
 ## 2.2 Domain-Specific Languages
 
-So, now that we have the architecture details out of the way, lets discuss how we program a system like this. Most often, you will
-not be programming these devices (hardware accelerators) using assembly language. The act of programming these devices are so tedious,
+So, now that we have the architecture details out of the way, let's discuss how we program a system like this. Most often, you will
+not be programming these devices (hardware accelerators) using assembly language. The act of programming these devices is so tedious,
 that often the designers of the device build an extremely low-level language to communicate with the device. This language is often
-built on top of C and use "intrinsic" instructions to perform operations on the device. For example, an intrinsic may exist to perform
+built on top of C and uses "intrinsic" instructions to perform operations on the device. For example, an intrinsic may exist to perform
 a matrix multiply between two matrices or copy data from one buffer to another. This is a step higher than assembly and makes it easier
 to program on the device.
 
-This process of making a low-level language to comminicate more directly with a specific hardware-accelerator is sometimes called a
+This process of making a low-level language to communicate more directly with a specific hardware-accelerator is sometimes called a
 Domain-Specific Language (DSL).
 
 For example, there may be instructions for copying data using the DMA unit from/to each type of buffer:
@@ -299,9 +298,9 @@ There may also be instructions for performing operations, such as matmul or vect
 __matmul(void* dest_ptr, void* a_ptr, void* b_ptr, uint32_t config);
 __vec_add(void* dest_ptr, void* a_ptr, void* b_ptr, uint32_t config);
 ```
-Note that these pointers are pointers to their respective buffers. For example, `a_ptr` and `b_ptr` for the matmul will be in Buff A and B, however for the vec_add they would be in the UB. It is on the programmer to ensure that the data is located in the correct buffers at valid locations.
+Note that these pointers are pointers to their respective buffers. For example, `a_ptr` and `b_ptr` for the matmul will be in Buffer A and B, however for the vec_add they would be in the UB. It is up to the programmer to ensure that the data is located in the correct buffers at valid locations.
 
-These DSL are often very simple and close to the hardware, such that the compiler is more easily written and directly translates to
+These DSLs are often very simple and close to the hardware, such that the compiler is more easily written and directly translates to
 deterministic machine instructions, but tend to be extremely hard for humans to program.
 
 ## 2.3 Host Kernel Launch Code
@@ -328,29 +327,29 @@ Let's start with the device code, and call it `matmul_256_256_f32_kernel.c`:
 void matmul_256_256_f32_kernel(float* c, float* a, float* b) {
     // We assume that a, b, and c are in the L1 buffer.
 
-    // start by creating pointers in the UB to accomodate the data.
+    // start by creating pointers in the UB to accommodate the data.
     // NOTE: In this architecture, we are assuming that we manage our own memory. This is not always the case.
     float* a_ub_ptr = (float*)(0);
-    float* b_ub_ptr = (float*)(162144);
-    float* c_ub_ptr = (float*)(324288);
+    float* b_ub_ptr = (float*)(262144);
+    float* c_ub_ptr = (float*)(524288);
 
-    // Create a pointers to the bottom of Buffers A, B, and C as target addresses.
+    // Create pointers to the bottom of Buffers A, B, and C as target addresses.
     float* buf_a_ptr = (float *)(0);
     float* buf_b_ptr = (float *)(0);
     float* buf_c_ptr = (float *)(0);
 
     // Then move the data from the L1 buffer to the UB.
-    // Copy 162,144 bytes (256x256 f32 elements) for each input.
-    __dma_L1_to_ub(a_ub_ptr, a, 162144);
-    __dma_L1_to_ub(b_ub_ptr, b, 162144);
+    // Copy 262,144 bytes (256x256 f32 elements) for each input.
+    __dma_L1_to_ub(a_ub_ptr, a, 262144);
+    __dma_L1_to_ub(b_ub_ptr, b, 262144);
 
-    // Syncronize the memory. Often these operations are asyncronous to allow multiple DMAs to happen in parallel,
+    // Synchronize the memory. Often these operations are asynchronous to allow multiple DMAs to happen in parallel,
     // here we wait for them to finish before starting the next copy.
     __sync_mem();
 
     // Then copy the data from the UB to the a and b buffers.
-    __dma_L1_to_buffer_a(buf_a_ptr, a_ub_ptr, 162144);
-    __dma_L1_to_buffer_b(buf_b_ptr, b_ub_ptr, 162144);
+    __dma_ub_to_buffer_a(buf_a_ptr, a_ub_ptr, 262144);
+    __dma_ub_to_buffer_b(buf_b_ptr, b_ub_ptr, 262144);
 
     // Sync again before starting the matmul.
     __sync_mem();
@@ -364,11 +363,11 @@ void matmul_256_256_f32_kernel(float* c, float* a, float* b) {
     __sync_systolic_array();
 
     // Copy the result out into L1.
-    __dma_buffer_c_to_ub(c_ub_ptr, buf_c_ptr, 162144);
+    __dma_buffer_c_to_ub(c_ub_ptr, buf_c_ptr, 262144);
     __sync_mem();
-    __dma_ub_to_L1(c, c_ub_ptr, 162144);
+    __dma_ub_to_L1(c, c_ub_ptr, 262144);
 
-    // Syncronize the memory before completing.
+    // Synchronize the memory before completing.
     __sync_mem();
 }
 ```
@@ -395,7 +394,7 @@ int main(void) {
 }
 ```
 
-NOTE: Often-times the kernel and the host code are written in the same source file, and a specialized heterogeneous compiler will then separate
+NOTE: Oftentimes the kernel and the host code are written in the same source file, and a specialized heterogeneous compiler will then separate
 the kernel from the host code and manage the launches for you (CUDA is a good example of this). For this example, I wanted to keep things as simple
 as possible, so I decided to be explicit about this. What you are seeing above is a more written-out example of how this is done.
 
