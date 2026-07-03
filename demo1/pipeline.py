@@ -31,6 +31,8 @@ def _dump(mlir_text: str, out_dir: Path | None, filename: str) -> None:
 
 
 def torch_to_tosa(mlir_text: str) -> str:
+    # First lowers `torch` to the intermediate `torch-backend` dialect
+    # (mentioned but not shown in the README), then from there to TOSA.
     mlir_text = _run(
         TORCH_MLIR_OPT,
         mlir_text,
@@ -44,6 +46,9 @@ def torch_to_tosa(mlir_text: str) -> str:
 
 
 def tosa_to_linalg(mlir_text: str) -> str:
+    # TOSA has no single "convert to linalg" pass; each op category
+    # (named linalg ops, generic linalg ops, arith, scf, tensor) has its own
+    # conversion, so we run them all and canonicalize the result.
     return _run(
         MLIR_OPT,
         mlir_text,
@@ -59,6 +64,9 @@ def tosa_to_linalg(mlir_text: str) -> str:
 
 
 def bufferize(mlir_text: str) -> str:
+    # one-shot-bufferize converts the tensor SSA values used so far into
+    # memrefs (explicit buffers), which is what the rest of the pipeline
+    # (and the compiled .so's ABI) operates on.
     return _run(
         MLIR_OPT,
         mlir_text,
@@ -71,6 +79,10 @@ def bufferize(mlir_text: str) -> str:
 
 
 def linalg_to_scf(mlir_text: str) -> str:
+    # Lowers structured linalg ops (e.g. linalg.generic, linalg.batch_matmul)
+    # into explicit loops in the scf dialect, then further into unstructured
+    # control flow (cf) so the LLVM lowering below has ordinary branches to
+    # work with.
     return _run(
         MLIR_OPT,
         mlir_text,
@@ -84,7 +96,13 @@ def linalg_to_scf(mlir_text: str) -> str:
 
 def _inject_c_interface(mlir_text: str) -> str:
     """Add llvm.emit_c_interface to every func.func so convert-func-to-llvm
-    generates _mlir_ciface_* wrappers with pointer-to-struct ABI."""
+    generates _mlir_ciface_* wrappers with pointer-to-struct ABI.
+
+    This is what lets runner.py call the compiled .so with plain ctypes: without
+    it, the exported symbol would use MLIR's default calling convention
+    (arguments passed as separate scalars/pointers rather than one struct
+    pointer per memref), which is awkward to call from outside MLIR-generated
+    code."""
     lines = []
     for line in mlir_text.splitlines():
         if re.match(r"\s*func\.func\s+@", line) and line.rstrip().endswith("{"):

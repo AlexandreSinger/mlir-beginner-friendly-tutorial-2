@@ -59,6 +59,15 @@ def scaled_dot_product_attention_decomp(
     return torch.matmul(attn, value)
 
 
+# Neither SampleMLP nor FullyConnected need any of these — they only use
+# Linear and ReLU, which torch-mlir/TOSA already lowers natively. These three
+# decompositions are kept as worked examples for extending the demo to
+# sequence/attention-based models: if you add a model and torch.export's
+# run_decompositions() fails because TOSA has no lowering for some aten op,
+# this is where you'd add a rewrite (in terms of ops TOSA does support) to
+# fix it. These particular decompositions come from
+# [Robert's Waferscape Project](https://github.com/robluo/WaferScapeMapper),
+# which this demo's pipeline code was originally borrowed from.
 CUSTOM_DECOMPOSITIONS = {
     aten.diff.default:                          diff_decomp,
     aten.__and__.Tensor:                        and_tensor_decomp,

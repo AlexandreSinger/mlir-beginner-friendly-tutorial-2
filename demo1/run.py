@@ -32,6 +32,14 @@ def make_random_inputs(example_inputs: tuple) -> list[torch.Tensor]:
 BATCH_SIZE = 256
 mlp   = SampleMLP()
 fc_layer = FullyConnected()
+# The two models above are the only ones this tutorial covers. The lines below
+# are left as a template for trying your own PyTorch models: torchvision/HF
+# wrapper classes like ResNet18Wrapper, GPT2Wrapper, etc. are NOT included in
+# this repo — you'll need to write your own nn.Module wrapper (see mlp.py /
+# fully_connected_layer.py for the expected shape: forward() + inputs()) before
+# uncommenting the matching entry below. These particular wrappers come from
+# [Robert's Waferscape Project](https://github.com/robluo/WaferScapeMapper),
+# which this demo's pipeline code was originally borrowed from.
 # conv  = SampleConv()
 # rn18  = ResNet18Wrapper(pretrained=False)
 # rn50  = ResNet50Wrapper(pretrained=False)

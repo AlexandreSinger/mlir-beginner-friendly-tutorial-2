@@ -19,6 +19,14 @@ def _inline_buffers(exported: torch.export.ExportedProgram) -> None:
     torch.vtensor.literal constants, removing them from the function signature.
 
     Mutates exported.graph in-place.
+
+    Neither of this tutorial's models (SampleMLP, FullyConnected) register any
+    buffers, so this function is a no-op for them. It's kept here so you can
+    drop in a model with BatchNorm (or other persistent buffer state) later
+    without silently picking up extra memref arguments in the signature. This
+    handling comes from [Robert's Waferscape Project]
+    (https://github.com/robluo/WaferScapeMapper), which this demo's pipeline
+    code was originally borrowed from.
     """
     sig = exported.graph_signature
     if not sig.inputs_to_buffers:

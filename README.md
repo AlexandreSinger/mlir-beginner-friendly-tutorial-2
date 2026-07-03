@@ -55,7 +55,6 @@ Finally, we will need to update our Python Path to point to the torch-mlir pytho
 ```
 export PYTHONPATH="$(pwd)/build/tools/torch-mlir/python_packages/torch_mlir:$PYTHONPATH"
 ```
-<!-- TODO: Verify if this is true, or if there is an easy repeatable way to do this. -->
 
 These instructions were graciously donated by Robert Luo from his WaferScapeMapper project: https://github.com/robluo/WaferScapeMapper
 
@@ -420,7 +419,7 @@ Coming Soon!
 
 <!-- Level 0: Direct hardware intrinsics (no abstraction); Level 1: Higher-level abstraction of hardware; Level 2: Hardware Kernel abstraction; Level 3: Linalg abstraction (dynamic Conv Layer, dynamic FC layer, etc.), Linalg; Level 4: Application abstraction (Pytorch Model). Each level is a dialect which can be translated to a lower level. You choose which level to enter on. Need to show with an example how we can go from level 3 down to level 0. -->
 
-# Demo 4: Modifying Torch-MLIR to Target our Hardware Accelerator
+# Demo 4: Modifying Our Torch-MLIR Compiler to Target our Hardware Accelerator
 
 Coming Soon!
 
