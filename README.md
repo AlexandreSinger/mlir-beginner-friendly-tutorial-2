@@ -243,14 +243,22 @@ will look something like the figure below:
 
 ![Hardware Accelerator Architecture](resources/BasicAcceleratorArchitecture.png)
 
-This hardware accelerator architecture is based on the [Huawei DaVinci AI chip](https://doi.org/10.1016/j.jpdc.2023.01.008) that I used to work with, but I have simplified it slightly for brevity (and obfuscated a few things). The architecture is made up of publicly available information on the DaVinci chip, where I filled in some gaps using the [Google TPU architecture](https://doi-org.myaccess.library.utoronto.ca/10.1145/3079856.3080246). Frankly, the exact details of the accelerator are not important, I just wanted to keep things realistic for this tutorial.
+This hardware accelerator architecture is based on the [Huawei DaVinci AI chip](https://doi.org/10.1016/j.jpdc.2023.01.008) that I used to work with, but I have simplified it slightly for brevity (and obfuscated a few things). The architecture is made up of publicly available information on the DaVinci chip, where I filled in some gaps using the [Google TPU architecture](https://doi.org/10.1145/3079856.3080246). Frankly, the exact details of the accelerator are not important, I just wanted to keep things realistic for this tutorial.
 
-This accelerator has three compute units (shown in green): a systolic array for accelerating matrix multiply operations, a vector unit
-for accelerating SIMD (Single Instruction Multiple Data) operations, and a scalar unit to handle computing offsets and scalar operations. The systolic array is directly connected to three buffers (shown in blue): Buffer A and B (both 256 KB) are for the A and B matrix inputs
-and Buffer C (256 KB) for the output. Buffer C is directly connected to the vector unit to optimize applying activation functions after
-performing a matrix multiply. The vector and scalar units are connected to a 24 MB UB (Unified Buffer). Connected to the accelerator is an 8
-GB L1 cache which holds the inputs and outputs transferred to and from the host computer. A DMA (Direct Memory Access) controller is
-used to move memory between the different buffers (for example moving data from the L1 to the UB, UB to Buffer A, etc.).
+This accelerator has three compute units (shown in green):
+- A **systolic array** for accelerating matrix multiply operations.
+- A **vector unit** for accelerating SIMD (Single Instruction Multiple Data) operations.
+- A **scalar unit** for computing offsets and other scalar operations.
+
+The systolic array is directly wired to three operand buffers (shown in blue):
+- **Buffer A** and **Buffer B** (256 KB each) hold the matrix multiply inputs.
+- **Buffer C** (256 KB) holds the matrix multiply output, and is also connected directly to the vector unit — so activation functions can be applied to the result without an extra copy.
+
+Data reaches these buffers through two staging memories (shown in orange):
+- The **UB (Unified Buffer)** (24 MB), connected to the vector and scalar units, and used to stage data before it moves into Buffer A, B, or C.
+- The **L1 cache** (8 GB), which sits between the accelerator and the host, holding the inputs and outputs transferred to and from the host computer.
+
+A **DMA (Direct Memory Access) controller** moves data between these buffers (for example, from L1 to the UB, or from the UB to Buffer A).
 
 The overall system is shown below:
 
@@ -316,7 +324,7 @@ __HostKernelLaunch(char* kernel_file_path, void** args, void** res, uint32_t con
 
 Where `kernel_file_path` is a path to the binary file of the compiled kernel (to be executed on the device), args is a pointer
 to the arguments of the kernel, res is an allocated pointer to where in memory the result should be stored, and config is a
-configuration struct that contains information on the size and number of args and results.
+configuration value that contains information on the size and number of args and results.
 
 ## 2.4 Full Host and Device Example
 
