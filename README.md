@@ -2,6 +2,8 @@
 
 This is a continuation of my last beginner-friendly tutorial on MLIR, found on GitHub here: https://github.com/AlexandreSinger/mlir-beginner-friendly-tutorial
 
+Part 1 of this tutorial was presented during the weekly Reading Group at the University of Toronto. The recording of this presentation can be found here: [https://youtu.be/Uno_XhtkT5E](https://youtu.be/dae1cvzAoIM)
+
 I wanted to build on my previous tutorial by discussing how MLIR is used in the context of programming hardware accelerators.
 Although the first tutorial is not required to follow along with this tutorial, it is recommended that you watch / read the
 prior tutorial before this one. The key things from the last tutorial you will need are how to read MLIR's Intermediate Representation, what multi-level means in the context of MLIR, and how different levels are lowered in the MLIR framework.
