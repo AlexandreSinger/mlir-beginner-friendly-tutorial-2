@@ -417,13 +417,45 @@ In the following demos, we will discuss how we can still achieve excellent perfo
 
 # Demo 3: Picking a Target Level for our Hardware Accelerator
 
-Coming Soon!
+Now that we have built a CPU compiler using PyTorch as a front-end, and we understand the programming model for the hardware accelerator we want to target, we now need to plan out how we will go from the PyTorch Dialect (Application Abstraction level) to the bare-metal hardware instructions (Direct Hardware Intrinsics). As was discussed in the last tutorial and this tutorial, the proper way to do this in MLIR is to use multiple dialects; where each dialect can easily be translated to lower ones. In this tutorial, we will discuss dialects in the context of "abstraction levels".
+
+## 3.1: Levels of Abstraction
+
+We talked briefly on abstraction levels in the first tutorial, but I wanted to reiterate it here.
+
+In general, an abstraction level is a concept / idea where all of the code in the kernel is at the same level of abstraction. For example, in the first tutorial we discussed the Affine dialect as being at the Affine level of abstraction. All code that is expressed in the affine dialect follows some baked-in assumptions about how the operations can be used and values are moved from one operation / scope to another.
+
+When you imagine lowering in MLIR, you should be envisioning moving from one level of abstraction down to another. Or, more directly, we are trying to take our front-end level of abstraction (I like to call the Application Level) and lower it to the bare-metal level of abstraction (instructions that will run directly on the hardware). The goal of this exercise is select what levels we need in-between that will make this process easier.
+
+The figure below demonstrates what I mean by this:
+
+<!-- TODO: Add figure of the pyramid. -->
+
+For this tutorial, I have simplified the abstraction levels some (usually you would have more levels depending on the architecture and goals); but most accelerator compiler pipelines will follow a similar flow. At the bottom we have the dialect that perfectly matches the domain-specific language we introduced in Demo 2, and at the top we have the `torch` dialect front-end code we entered into in Demo 1. The levels in-between are natural stepping stones to connect the two levels together. We lower our application abstraction into a kernel graph (a graph where the application is decomposed into distinct functional kernels), we then lower the kernels into host-accelerator kernel launches, then we lower the device side into low-level vector / matrix operations (we assume the host-side is lowered using the flow we showed in Demo 1), and then we lower the low-level vector / matrix operations to our domain-specific language.
+
+I now want to step through each of these levels to explain why they are useful and what an example of these may look like.
+
+## 3.2: Level 0: Direct Hardware Intrinsics
+
+## 3.3: Level 1: Low-Level Vector / Matrix Operations
+
+## 3.4: Level 2: Host / Accelerator Launch Abstraction
+
+## 3.5: Level 3: Kernel Graph Abstraction
+
+## 3.6: Level 4: Application Abstraction
+
+## 3.7: Full Lowering Example
 
 <!-- Level 0: Direct hardware intrinsics (no abstraction); Level 1: Higher-level abstraction of hardware; Level 2: Hardware Kernel abstraction; Level 3: Linalg abstraction (dynamic Conv Layer, dynamic FC layer, etc.), Linalg; Level 4: Application abstraction (Pytorch Model). Each level is a dialect which can be translated to a lower level. You choose which level to enter on. Need to show with an example how we can go from level 3 down to level 0. -->
 
 # Demo 4: Modifying Our Torch-MLIR Compiler to Target our Hardware Accelerator
 
-Coming Soon!
+## 4.1: Kernel Template Matching
+
+## 4.2: CiFace
+
+## 4.3: Lowering
 
 <!-- Use Linalg for Level 3. Use CiFace for Level 2 (maybe make simple pass). Assume Level 2 lowering is done in a custom library for simplicity. -->
 
