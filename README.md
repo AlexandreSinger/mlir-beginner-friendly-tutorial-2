@@ -433,9 +433,60 @@ The figure below demonstrates what I mean by this:
 
 For this tutorial, I have simplified the abstraction levels some (usually you would have more levels depending on the architecture and goals); but most accelerator compiler pipelines will follow a similar flow. At the bottom we have the dialect that perfectly matches the domain-specific language we introduced in Demo 2, and at the top we have the `torch` dialect front-end code we entered into in Demo 1. The levels in-between are natural stepping stones to connect the two levels together. We lower our application abstraction into a kernel graph (a graph where the application is decomposed into distinct functional kernels), we then lower the kernels into host-accelerator kernel launches, then we lower the device side into low-level vector / matrix operations (we assume the host-side is lowered using the flow we showed in Demo 1), and then we lower the low-level vector / matrix operations to our domain-specific language.
 
-I now want to step through each of these levels to explain why they are useful and what an example of these may look like.
+When designing dialect levels like this, it is a good idea to know where you are coming from (the `torch` dialect) and where you are going (the domain-specific language) and then meeting in the middle. For the rest of the demo we will be moving from the bottom up, which I find more intuitive and it can flag any issues you may run into in expression. It is very easy to "design yourself into a corner" so to speak; so its best to know the limitations of the lower dialects as you move up. As we move up through each dialect, I will explain why each level of abstraction is useful and what an example of each dialect may look like.
 
 ## 3.2: Level 0: Direct Hardware Intrinsics
+
+As seen in dialects, such as the LLVM dialect, it is convenient to have dialects that are one-to-one with your target abstraction. In the case of LLVM, we use the LLVM dialect as a staging area in MLIR to target LLVMIR. Similarly, we want a "Level 0" dialect that is as close to the bare-metal domain-specific language I described in Demo 2. Since the goal is to make this identical to the domain-specific language, this dialect is very easy to design (as in there are not many choices to make).
+
+Let's take our kernel from Section 2.4 and translate it into a hypothetical MLIR dialect to inform how we should design our Level 0 dialect:
+```mlir
+// We are using the built-in module. Its a good idea to add metadata about the data layout and triple for what
+// we are targeting here. This says: "this module is not targeting a CPU, its targeting my accelerator".
+module attributes {my_accelerator.data_layout = "...",
+                   my_accelerator.target_triple = "..."} {
+    func.func @matmul_256_256_f32_kernel(%c: !my_accelerator.ptr<f32>, %a: !my_accelerator.ptr<f32>, %b: !my_accelerator.ptr<f32>) {
+        %cst_0 = my_accelerator.constant 0 : i64
+        %cst_262144 = my_accelerator.constant 262144 : i64
+        %cst_524288 = my_accelerator.constant 524288 : i64
+        %a_ub_ptr = my_accelerator.inttoptr(%cst_0) : (i64) -> !my_accelerator.ptr<f32>
+        %b_ub_ptr = my_accelerator.inttoptr(%cst_262144) : (i64) -> !my_accelerator.ptr<32>
+        %c_ub_ptr = my_accelerator.inttoptr(%cst_524288) : (i64) -> !my_accelerator.ptr<32>
+
+        %buf_a_ptr = my_accelerator.inttoptr(%cst_0) : (i64) -> !my_accelerator.ptr<f32>
+        %buf_b_ptr = my_accelerator.inttoptr(%cst_0) : (i64) -> !my_accelerator.ptr<f32>
+        %buf_c_ptr = my_accelerator.inttoptr(%cst_0) : (i64) -> !my_accelerator.ptr<f32>
+
+        %dma_copy_size = my_accelerator.constant 262144 : i64
+        my_accelerator.dma_L1_to_ub(%a_ub_ptr, %a, %dma_copy_size) : !my_accelerator.ptr<f32>
+        my_accelerator.dma_L1_to_ub(%b_ub_ptr, %b, %dma_copy_size) : !my_accelerator.ptr<f32>
+
+        my_accelerator.sync_mem()
+
+        my_accelerator.dma_ub_to_buffer_a(%buf_a_ptr, %a_ub_ptr, %dma_copy_size) : !my_accelerator.ptr<f32>
+        my_accelerator.dma_ub_to_buffer_b(%buf_b_ptr, %b_ub_ptr, %dma_copy_size) : !my_accelerator.ptr<f32>
+
+        my_accelerator.sync_mem()
+
+        %matmul_config = my_accelerator.constant 0xDEADBEEF : i64
+        my_accelerator.matmul(%buf_c_ptr, %buf_a_ptr, %buf_b_ptr, %matmul_config) : !my_accelerator.ptr<f32>
+
+        my_accelerator.sync_systolic_array()
+
+        my_accelerator.dma_buffer_c_to_ub(%c_ub_ptr, %buf_c_ptr, %dma_copy_size) : !my_accelerator.ptr<f32>
+        my_accelerator.sync_mem()
+        my_accelerator.dma_ub_to_L1(%c, $c_ub_ptr, %dma_copy_size) : !my_accelerator.ptr<f32>
+
+        my_accelerator.sync_mem()
+    }
+}
+```
+
+This exercise of writing what the dialect might look like is a great way of designing any dialect. If you struggle to express a kernel by hand, you will struggle to express it in the compiler passes you will write.
+
+<!-- TODO: Walk through how this was made. -->
+
+Aside: There is something called "address spaces" that I am abstracting away here in bare pointers. If you are actually building a bare-metal language, you would often have pointers living in different address spaces (for example, we would have a different address space for the UB, L1, etc.). This is to better distinguish what addresses can be used with each intrinsic (and to protect the user from shooting themselves in the foot). MLIR allows you to specify address spaces; I just wanted to keep this tutorial more approachable, so we assume the address spaces are implicitly handled.
 
 ## 3.3: Level 1: Low-Level Vector / Matrix Operations
 
