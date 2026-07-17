@@ -253,7 +253,7 @@ This accelerator has three compute units (shown in green):
 
 The systolic array is directly wired to three operand buffers (shown in blue):
 - **Buffer A** and **Buffer B** (256 KB each) hold the matrix multiply inputs.
-- **Buffer C** (256 KB) holds the matrix multiply output, and is also connected directly to the vector unit — so activation functions can be applied to the result without an extra copy.
+- **Buffer C** (256 KB) holds the matrix multiply output, and is also connected directly to the vector unit; so activation functions can be applied to the result without an extra copy.
 
 Data reaches these buffers through two staging memories (shown in orange):
 - The **UB (Unified Buffer)** (24 MB), connected to the vector and scalar units, and used to stage data before it moves into Buffer A, B, or C.
@@ -433,9 +433,9 @@ The figure below demonstrates what I mean by this:
 
 For this tutorial, I have simplified the abstraction levels some (usually you would have more levels depending on the architecture and goals) and you would normally have many more dialects; but most accelerator compiler pipelines would at least have these levels. This lowering diagram looks a bit different than our previous ones due to us now creating a heterogeneous compiler (we are targeting two devices with the same source file). The host code side will look very similar to how we previously lowered the PyTorch code to CPU; the device kernel side is where things need to be different.
 
-At the bottom of the device kernel side we have the dialect that perfectly matches the domain-specific language we introduced in Demo 2, and the source of the code we are trying to optimize is coming from the `torch` dialect front-end code we entered into in Demo 1. The levels in-between are natural stepping stones connecting the two ends together. We lower our application abstraction into a kernel graph (a graph where the application is decomposed into distinct functional kernels; i.e. Linalg on Buffers), we then lower the kernels into host-accelerator kernel launches, then we lower the device side into low-level vector / matrix operations (we assume the host-side is lowered using the flow we showed in Demo 1), and then we lower the low-level vector / matrix operations to our domain-specific language.
+At the bottom of the device kernel side we have the dialect that perfectly matches the domain-specific language we introduced in Demo 2, and the source of the code we are trying to optimize is coming from the `torch` dialect front-end code we entered into in Demo 1. The levels in-between are natural stepping stones connecting the two ends together: a kernel graph (a graph where the application is decomposed into distinct functional kernels; i.e. Linalg on Buffers), a host/accelerator launch boundary, and a low-level vector / matrix layer.
 
-When designing dialect levels like this, it is a good idea to know where you are coming from (the `torch` dialect) and where you are going (the domain-specific language) and then meeting in the middle. For the rest of the demo we will be moving from the bottom up, which I find more intuitive and it can flag any issues you may run into when trying to express a kernel. It is very easy to "design yourself into a corner" so to speak; so it's best to know the limitations of the lower dialects as you move up. As we move up through each dialect, I will explain why each level of abstraction is useful and what an example of each dialect may look like.
+When designing dialect levels like this, it is a good idea to know both endpoints (the `torch` dialect and the domain-specific language) and work to meet in the middle. For the rest of the demo we will be moving from the bottom up, which I find more intuitive and it can flag any issues you may run into when trying to express a kernel. It is very easy to "design yourself into a corner" so to speak; so it's best to know the limitations of the lower dialects as you move up. As we move up through each dialect, I will explain why each level of abstraction is useful and what an example of each level may look like.
 
 ## 3.2: Level 0: Direct Hardware Intrinsics
 
