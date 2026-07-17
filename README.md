@@ -421,7 +421,7 @@ Now that we have built a CPU compiler using PyTorch as a front-end, and we under
 
 ## 3.1: Levels of Abstraction
 
-We talked briefly on abstraction levels in the first tutorial, but I wanted to reiterate it here.
+We talked briefly about abstraction levels in the first tutorial, but I wanted to reiterate it here.
 
 In general, an abstraction level is a concept / idea where all of the code in the kernel is at the same level of abstraction. For example, in the first tutorial we discussed the Affine dialect as being at the Affine level of abstraction. All code that is expressed in the affine dialect follows some baked-in assumptions about how the operations can be used and values are moved from one operation / scope to another.
 
@@ -429,11 +429,11 @@ When you imagine lowering in MLIR, you should be envisioning moving from one lev
 
 The figure below demonstrates what I mean by this:
 
-<!-- TODO: Add figure of the pyramid. Maybe not pyramid, instead show host and device dialects as they are lowered in the dialect tree. -->
+![Hardware Accelerator Dialect Lowering Diagram](resources/HardwareAcceleratorLoweringDialectDiagram.png)
 
 For this tutorial, I have simplified the abstraction levels some (usually you would have more levels depending on the architecture and goals); but most accelerator compiler pipelines will follow a similar flow. At the bottom we have the dialect that perfectly matches the domain-specific language we introduced in Demo 2, and at the top we have the `torch` dialect front-end code we entered into in Demo 1. The levels in-between are natural stepping stones to connect the two levels together. We lower our application abstraction into a kernel graph (a graph where the application is decomposed into distinct functional kernels), we then lower the kernels into host-accelerator kernel launches, then we lower the device side into low-level vector / matrix operations (we assume the host-side is lowered using the flow we showed in Demo 1), and then we lower the low-level vector / matrix operations to our domain-specific language.
 
-When designing dialect levels like this, it is a good idea to know where you are coming from (the `torch` dialect) and where you are going (the domain-specific language) and then meeting in the middle. For the rest of the demo we will be moving from the bottom up, which I find more intuitive and it can flag any issues you may run into in expression. It is very easy to "design yourself into a corner" so to speak; so its best to know the limitations of the lower dialects as you move up. As we move up through each dialect, I will explain why each level of abstraction is useful and what an example of each dialect may look like.
+When designing dialect levels like this, it is a good idea to know where you are coming from (the `torch` dialect) and where you are going (the domain-specific language) and then meeting in the middle. For the rest of the demo we will be moving from the bottom up, which I find more intuitive and it can flag any issues you may run into when trying to express a kernel. It is very easy to "design yourself into a corner" so to speak; so it's best to know the limitations of the lower dialects as you move up. As we move up through each dialect, I will explain why each level of abstraction is useful and what an example of each dialect may look like.
 
 ## 3.2: Level 0: Direct Hardware Intrinsics
 
@@ -441,8 +441,8 @@ As seen in dialects, such as the LLVM dialect, it is convenient to have dialects
 
 Let's take our kernel from Section 2.4 and translate it into a hypothetical MLIR dialect to inform how we should design our Level 0 dialect:
 ```mlir
-// We are using the built-in module. Its a good idea to add metadata about the data layout and triple for what
-// we are targeting here. This says: "this module is not targeting a CPU, its targeting my accelerator".
+// We are using the built-in module. It's a good idea to add metadata about the data layout and triple for what
+// we are targeting here. This says: "this module is not targeting a CPU, it's targeting my accelerator".
 module attributes {accel_bare.data_layout = "...",
                    accel_bare.target_triple = "..."} {
     func.func @matmul_256_256_f32_kernel(%c: !accel_bare.ptr<f32>,
@@ -477,7 +477,7 @@ module attributes {accel_bare.data_layout = "...",
 
         accel_bare.dma_buffer_c_to_ub(%c_ub_ptr, %buf_c_ptr, %dma_copy_size) : !accel_bare.ptr<f32>
         accel_bare.sync_mem()
-        accel_bare.dma_ub_to_L1(%c, $c_ub_ptr, %dma_copy_size) : !accel_bare.ptr<f32>
+        accel_bare.dma_ub_to_L1(%c, %c_ub_ptr, %dma_copy_size) : !accel_bare.ptr<f32>
 
         accel_bare.sync_mem()
     }
@@ -488,13 +488,13 @@ This exercise of writing what the dialect might look like is a great way of desi
 
 I decided to name this dialect `accel_bare`. There is nothing special about this name, it is just a custom dialect for our accelerator that is as bare-metal as possible in MLIR. The aim of this dialect is to have a source dialect to *translate* from. We discussed translation in the first tutorial for how to go from the llvm dialect to LLVMIR. Briefly, translation is the process of converting MLIR code into another representation. In this case, we will use this dialect to translate into C. `mlir-translate` is reasonably well documented for C, so it is left as an exercise for the reader to build this translation.
 
-You will notice that this code is literally one-to-one with the reference code. This may seem wasteful; someone might ask "why are we doing this instead of using a higher-level dialect before entering our domain-specific language". The answer is simply that it is so much easier to manipulate MLIR code in the MLIR framework. The second we start translating MLIR code to another language (like C), modifying the code becomes extremely difficult. You want the translation to be so obvious that its silly.
+You will notice that this code is literally one-to-one with the reference code. This may seem wasteful; someone might ask "why are we doing this instead of using a higher-level dialect before entering our domain-specific language". The answer is simply that it is so much easier to manipulate MLIR code in the MLIR framework. The second we start translating MLIR code to another language (like C), modifying the code becomes extremely difficult. You want the translation to be so obvious that it's silly.
 
-Before we move onto the next level of abstraction, lets discuss some of the annoying aspects of this level.
+Before we move onto the next level of abstraction, let's discuss some of the annoying aspects of this level.
 
-Mainly, we are operating on "bare" pointers. These are pointers with no metadata on where they are allocated, or even how they are allocated. They are literally integers casted to look like pointers. These are tremendously painful to work with. Normally, bare-metal domain-specific languages use something called "address spaces" to annotate pointers with metadata on where they are allocated (for example, we would have a different address space for the UB, L1, etc.). This is to better distinguish what addresses can be used with each intrinsic (and to protect the user from shooting themselves in the foot). I chose not to add this to the domain-specific language since it made the description of it more complicated; and also, sometimes we do not get the luxury of these things. However, in MLIR there are ways that we can add this annotation, so we will use this in our higher-level dialect.
+Mainly, we are operating on "bare" pointers. These are pointers with no metadata on where they are allocated, or even how they are allocated. They are literally integers cast to look like pointers. These are tremendously painful to work with. Normally, bare-metal domain-specific languages use something called "address spaces" to annotate pointers with metadata on where they are allocated (for example, we would have a different address space for the UB, L1, etc.). This is to better distinguish what addresses can be used with each intrinsic (and to protect the user from shooting themselves in the foot). I chose not to add this to the domain-specific language since it made the description of it more complicated; and also, sometimes we do not get the luxury of address spaces. However, in MLIR there are ways that we can add this annotation, so we will use this in our higher-level dialect.
 
-Another annoying aspect of this level is that we do not know the *shape* of the data being processed. All of that information is hidden in the DMA copy sizes and the matmul config. This is horribly painful for optimization, but for targetting hardware it is very reasonable (and necessary for these intrinsics). When moving up to higher levels of abstractions we want to have this shape information; if we had the shapes, we can build the DMA copy sizes and matmul configs ourselves (in the compiler), as we are lowering.
+Another annoying aspect of this level is that we do not know the *shape* of the data being processed. All of that information is hidden in the DMA copy sizes and the matmul config. This is horribly painful for optimization, but for targeting hardware it is very reasonable (and necessary for these intrinsics). When moving up to higher levels of abstraction we want to have this shape information; if we have the shapes, we can build the DMA copy sizes and matmul configs ourselves (in the compiler), as we are lowering.
 
 ## 3.3: Level 1: Low-Level Vector / Matrix Operations
 
@@ -504,12 +504,12 @@ Just like before, we will write this by hand for now. What we will be doing is t
 ```mlir
 module attributes {accel_bare.data_layout = "...",
                    accel_bare.target_triple = "..."} {
-    // FIRST MAJOR CHANGE: No bare pointers. Pointers have address space and shape.
+    // FIRST MAJOR CHANGE: No bare pointers. Tensors have address space and shape.
     func.func @matmul_256_256_f32_kernel(%c: !accel.tensor<256x256xf32, #accel.address_space<L1>>,
                                          %a: !accel.tensor<256x256xf32, #accel.address_space<L1>>,
                                          %b: !accel.tensor<256x256xf32, #accel.address_space<L1>>) {
 
-        // SECOND MAJOR CHANGE: Pointers have an allocator function, not inttoptr ops.
+        // SECOND MAJOR CHANGE: Tensors have an allocator function, not inttoptr ops.
         %a_ub = accel.alloc_tensor() : !accel.tensor<256x256xf32, #accel.address_space<ub>>
         %b_ub = accel.alloc_tensor() : !accel.tensor<256x256xf32, #accel.address_space<ub>>
         %c_ub = accel.alloc_tensor() : !accel.tensor<256x256xf32, #accel.address_space<ub>>
@@ -535,7 +535,7 @@ module attributes {accel_bare.data_layout = "...",
 
         accel_bare.sync_mem()
 
-        // FOURTH MAJOR
+        // FOURTH MAJOR CHANGE: The matmul op operates directly on tensors instead of raw pointers and a hand-crafted config value.
         accel.matmul %buf_a x %buf_b -> %buf_c :
                 !accel.tensor<256x256xf32, #accel.address_space<buf_a>> x !accel.tensor<256x256xf32, #accel.address_space<buf_b>>
                     -> !accel.tensor<256x256xf32, #accel.address_space<buf_c>>
@@ -553,17 +553,17 @@ module attributes {accel_bare.data_layout = "...",
 }
 ```
 
-I have annotated in the code the major changes from the `accel_bare` dialect to this new `accel` dialect (again the name is not important, its just important that its higher than the bare-metal dialect). The key change here is that the pointers contain much more metadata that we can use to our advantage in the dialect to simplify the DMA and matmul ops.
+I have annotated in the code the major changes from the `accel_bare` dialect to this new `accel` dialect (again the name is not important, it's just important that it's higher than the bare-metal dialect). The key change here is that the tensors contain much more metadata that we can use to our advantage in the dialect to simplify the DMA and matmul ops.
 
-Another important change has to do with code safety. In the `accel_bare` dialect, there was no protection that the user was not making a mistake. It was not checking that the inttoptrs were valid, there was no verification that the DMAs were written properly, and there was no verification that the matmul config was correct (i.e. the shapes of the data are compatible). The issue was that we did not have the information to easily verify these things. Now that we have the shapes and address spaces, it is extremely easy for us to verify these things in MLIR. This is another reason to use higher-level dialects.
+Another important change has to do with code safety. In the `accel_bare` dialect, there was no protection against user mistakes. It was not checking that the inttoptrs were valid, there was no verification that the DMAs were written properly, and there was no verification that the matmul config was correct (i.e. the shapes of the data are compatible). The issue was that we did not have the information to easily verify these things. Now that we have the shapes and address spaces, it is extremely easy for us to verify these things in MLIR. This is another reason to use higher-level dialects.
 
-What is the next annoying aspect of this level that we do not like? Well, me personally, I think all of these different memory spaces are very annoying. When we are writing compiler passes, it will be very annoying to maintain "this pointer needs to be here, this pointer needs to be there, and we need to make sure that we do this copy from here to there..."; what we want is to simply write: "I want to perform a matrix multiply on my accelerator, let the compiler do whatever it needs to get that working". When moving up in abstraction, we really want to hide all of these different memories and make it appear as though all operations are occuring on a single, shared memory. This would make writing compiler passes significantly easier.
+What is the next annoying aspect of this level that we do not like? Well, personally, I think all of these different memory spaces are very annoying. When we are writing compiler passes, it will be very annoying to maintain "this pointer needs to be here, this pointer needs to be there, and we need to make sure that we do this copy from here to there..."; what we want is to simply write: "I want to perform a matrix multiply on my accelerator, let the compiler do whatever it needs to get that working". When moving up in abstraction, we really want to hide all of these different memories and make it appear as though all operations are occurring on a single, shared memory. This would make writing compiler passes significantly easier.
 
 ## 3.3b: Level 1.5: Device Code vs. Host Code
 
-Before moving on to the level 2 dialect, I wanted to introduce the difference between device and host code when working with heterogenous compilers. This can be thought of as an "intermediate level" between level 1 and level 2 in this demo.
+Before moving on to the level 2 dialect, I wanted to introduce the difference between device and host code when working with heterogeneous compilers. This can be thought of as an "intermediate level" between level 1 and level 2 in this demo.
 
-In MLIR, usually when you have two functions being compiled to different targets, you would use different modules for each one. Sometimes we even put these into two different MLIR files, but being in two different modules is the more important thing. Lets look at what the device and host codes may look like for this kernel:
+In MLIR, usually when you have two functions being compiled to different targets, you would use different modules for each one. Sometimes we even put these into two different MLIR files, but being in two different modules is the more important thing. Let's look at what the device and host codes may look like for this kernel:
 
 Device kernel:
 ```mlir
@@ -595,7 +595,7 @@ module attributes {llvm.data_layout = "...",
 }
 ```
 
-Notice that the two functions exist in different kernels with different attributes. For the device kernel, we set the "target_triple" to something that tells the compiler that its targeting my custom accelerator (as opposed to CPUs); while for the host code we use a different target_triple. In compilers, the target_triple is what tells the compiler the hardware details about where it is targeting. I will not go into more detail about this in this tutorial, but it is important to make this distinction.
+Notice that the two functions exist in different modules with different attributes. For the device kernel, we set the "target_triple" to something that tells the compiler that it's targeting my custom accelerator (as opposed to CPUs); while for the host code we use a different target_triple. In compilers, the target_triple is what tells the compiler the hardware details about where it is targeting. I will not go into more detail about this in this tutorial, but it is important to make this distinction.
 
 In general, after this point, the device kernel and host code will go down different compiler pipelines. The thing that links the host code and device kernel is the name of the kernel in the host code which is used in the `accel_host.launch_func` op that I made up, which will simply be lowered to the `__HostKernelLaunch` I described in Section 2.3.
 
@@ -603,7 +603,7 @@ Now that we have seen the "branching point" between the host code and device ker
 
 ## 3.4: Level 2: Host / Accelerator Launch Abstraction
 
-All of the lower levels I have shown have been focused on the device kernel code and I have ignored the host code. The reason is that we already have seen in the prior tutorials how host code is lowered (classic LLVM lowering); the host code is where the magic is happening for this tutorial. However, at some point the kernel and host code need to have existed in the same piece of code. Specifically, we want to abstract the point where the host is launching some function of operations to execute on the hardware. It is useful to have this level of abstraction as it allows us to perform host-level code optimizations before splitting the host code and device kernel compilation paths.
+All of the lower levels I have shown have been focused on the device kernel code and I have ignored the host code. The reason is that we already have seen in the prior tutorials how host code is lowered (classic LLVM lowering); the device kernel is where the magic is happening for this tutorial. However, at some point the kernel and host code need to have existed in the same piece of code. Specifically, we want to abstract the point where the host is launching some function of operations to execute on the hardware. It is useful to have this level of abstraction as it allows us to perform host-level code optimizations before splitting the host code and device kernel compilation paths.
 
 How to abstract this level in MLIR is a bit tricky since it really depends on what the communication between the host and accelerator is. It depends on what information is sent between the host and device, and the limitations on that transfer. For our hypothetical system, I have defined the dialect as follows, but this is by no means the only way to do this. I modelled this approach after the `gpu` dialect, which has a similar device/host abstraction model. As usual, this was also written by hand.
 
@@ -619,9 +619,9 @@ func.func @main() {
                       outs(%matrix_c: memref<256x256xf32>) {
         // In this scope we use a basic block to translate the memrefs of the host to accelerator tensors.
         // This is 100% a design choice, but I think this is reasonable since it distinguishes memrefs and
-        // !accel_high.tensor's as being host / device exclusively.
+        // !accel_high.tensors as being host / device exclusively.
         ^bb0(%a: !accel_high.tensor<256x256xf32>, %b: !accel_high.tensor<256x256xf32>, %c: !accel_high.tensor<256x256xf32>) {
-            // Now that we have removed the memory heirarchy, the matmul is very clean and easy to specify.
+            // Now that we have removed the memory hierarchy, the matmul is very clean and easy to specify.
             accel_high.matmul %a x %b -> %c : !accel_high.tensor<256x256xf32> x !accel_high.tensor<256x256xf32>
                                               -> !accel_high.tensor<256x256xf32>
             accel_high.return
@@ -632,9 +632,9 @@ func.func @main() {
 
 In this level we now have two dialects: `accel_host` and `accel_high`. One is for the host-side of the code that interacts with the accelerator, and the second is for representing the high-level accelerator operations.
 
-A common question I have seen is "why do we need to make our own high-level dialect for linalg operations (like what I did for `accel_high`)? Why not just use the `linalg` dialect?". The answer is that not all `linalg` operations can be done on our accelerator. We do not have a hardware intrinsic that can do convolution, for example; it must be converted into matmul operations first. What we put in the `accel_high` dialect is the subset of linear algebra operations that can easily be mapped to our hardware. We make this even more strict by forcing these operations to use our custom `!accel_high.tensor<256x256xf32>`. Since these tensors can only be generated by an `accel_host.launch` operation, it implies that these operations can only be used within the scope of that op. This is an extremely powerful design decision: it prevents the compiler from "compiling itself into a corner" where a kernel is stuck with nowhere to go. The key idea is this: if you can express the code snippet as a valid `accel_host.launch` operation and `accel_high` tensor operations, you are gaurenteed to be able to lower the code to the accelerator.
+A common question I have seen is "why do we need to make our own high-level dialect for linalg operations (like what I did for `accel_high`)? Why not just use the `linalg` dialect?". The answer is that not all `linalg` operations can be done on our accelerator. We do not have a hardware intrinsic that can do convolution, for example; it must be converted into matmul operations first. What we put in the `accel_high` dialect is the subset of linear algebra operations that can easily be mapped to our hardware. We make this even more strict by forcing these operations to use our custom `!accel_high.tensor<256x256xf32>`. Since these tensors can only be generated by an `accel_host.launch` operation, it implies that these operations can only be used within the scope of that op. This is an extremely powerful design decision: it prevents the compiler from "compiling itself into a corner" where a kernel is stuck with nowhere to go. The key idea is this: if you can express the code snippet as a valid `accel_host.launch` operation and `accel_high` tensor operations, you are guaranteed to be able to lower the code to the accelerator.
 
-Aside: We would normally add a constraint on `accel_host.launch` which limits how large the input and output tensors can be. This is because there is only so much space in the L1 cache that we can use to move our inputs and outputs into. In truth, there are ways of handling this; but I am leaving out of this tutorial for simplicity.
+Aside: We would normally add a constraint on `accel_host.launch` which limits how large the input and output tensors can be. This is because there is only so much space in the L1 cache that we can use to move our inputs and outputs into. In truth, there are ways of handling this; but I am leaving it out of this tutorial for simplicity.
 
 The value of this level is that we can safely optimize the kernel and host communication since they both exist in the code at the same time. This allows us to do things like kernel fusion, which fuses different kernels together to reduce communication overhead. In section 3.3b I discuss how this can be trivially lowered by splitting it into two modules. The CPU module will be lowered using a generic CPU pipeline, while our device kernel will be lowered using our custom dialects.
 
@@ -649,13 +649,13 @@ func.func @main() {
     %cst = arith.constant 0.000000e+00 : f32
     %matrix_c_init = tensor.splat %cst : tensor<256x256xf32>
     %matrix_c = linalg.matmul ins(%matrix_a, %matrix_b : tensor<256x256xf32>, tensor<256x256xf32>)
-                              outs(%matrix_c_init : tensor<256x256xf32>) -> tensor<256x1024xf32>
+                              outs(%matrix_c_init : tensor<256x256xf32>) -> tensor<256x256xf32>
 }
 ```
 
-The beauty of what we have done so far is that we can easily convert this code into our Level 2 abstraction. Any linalg ops that we cannot support (perhaps it just does not work well on our accelerator), we can just leave on the host! This is why we made the `accel_high` operations in the first place: we can only write kernels using that dialect if it can run on our accelerator. Anything that cannot be expressed in that dialect is left behind in linalg and lowered on the host. Obviously this may not be efficient (some operation can probably be lowered to the accelerator with work); but its better to always have a working compiler than having a fragile compiler that breaks randomly.
+The beauty of what we have done so far is that we can easily convert this code into our Level 2 abstraction. Any linalg ops that we cannot support (perhaps it just does not work well on our accelerator), we can just leave on the host! This is why we made the `accel_high` operations in the first place: we can only write kernels using that dialect if it can run on our accelerator. Anything that cannot be expressed in that dialect is left behind in linalg and lowered on the host. Obviously this may not be efficient (some operation can probably be lowered to the accelerator with work); but it's better to always have a working compiler than having a fragile compiler that breaks randomly.
 
-It should be obvious now how we get here. In the first tutorial we demonstrated how to enter the linalg dialect from a custom frontend library, and in this tutorial we showed how we can enter from PyTorch (which I think of as Level 4: the application abstracton). So we can use either one of these frontends for our compiler without issue!
+It should be obvious now how we get here. In the first tutorial we demonstrated how to enter the linalg dialect from a custom frontend library, and in this tutorial we showed how we can enter from PyTorch (which I think of as Level 4: the application abstraction). So we can use either one of these frontends for our compiler without issue!
 
 ## 3.6: Full Lowering Example
 
