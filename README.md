@@ -662,11 +662,15 @@ Now, what we have is a dialect entry point which can be targeted by any frontend
 
 ## 3.6: Full Lowering Example
 
+Coming Soon!
+
 <!-- Show a full lowering of a matmul / relu with dynamic size (or a weird size). Could be interesting. -->
 
 <!-- Level 0: Direct hardware intrinsics (no abstraction); Level 1: Higher-level abstraction of hardware; Level 2: Hardware Kernel abstraction; Level 3: Linalg abstraction (dynamic Conv Layer, dynamic FC layer, etc.), Linalg; Level 4: Application abstraction (Pytorch Model). Each level is a dialect which can be translated to a lower level. You choose which level to enter on. Need to show with an example how we can go from level 3 down to level 0. -->
 
 # Demo 4: Modifying Our Torch-MLIR Compiler to Target our Hardware Accelerator
+
+Coming Soon!
 
 ## 4.1: Kernel Template Matching
 
