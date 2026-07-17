@@ -443,41 +443,43 @@ Let's take our kernel from Section 2.4 and translate it into a hypothetical MLIR
 ```mlir
 // We are using the built-in module. Its a good idea to add metadata about the data layout and triple for what
 // we are targeting here. This says: "this module is not targeting a CPU, its targeting my accelerator".
-module attributes {my_accelerator.data_layout = "...",
-                   my_accelerator.target_triple = "..."} {
-    func.func @matmul_256_256_f32_kernel(%c: !my_accelerator.ptr<f32>, %a: !my_accelerator.ptr<f32>, %b: !my_accelerator.ptr<f32>) {
-        %cst_0 = my_accelerator.constant 0 : i64
-        %cst_262144 = my_accelerator.constant 262144 : i64
-        %cst_524288 = my_accelerator.constant 524288 : i64
-        %a_ub_ptr = my_accelerator.inttoptr(%cst_0) : (i64) -> !my_accelerator.ptr<f32>
-        %b_ub_ptr = my_accelerator.inttoptr(%cst_262144) : (i64) -> !my_accelerator.ptr<32>
-        %c_ub_ptr = my_accelerator.inttoptr(%cst_524288) : (i64) -> !my_accelerator.ptr<32>
+module attributes {accel_bare.data_layout = "...",
+                   accel_bare.target_triple = "..."} {
+    func.func @matmul_256_256_f32_kernel(%c: !accel_bare.ptr<f32>,
+                                         %a: !accel_bare.ptr<f32>,
+                                         %b: !accel_bare.ptr<f32>) {
+        %cst_0 = accel_bare.constant 0 : i64
+        %cst_262144 = accel_bare.constant 262144 : i64
+        %cst_524288 = accel_bare.constant 524288 : i64
+        %a_ub_ptr = accel_bare.inttoptr(%cst_0) : (i64) -> !accel_bare.ptr<f32>
+        %b_ub_ptr = accel_bare.inttoptr(%cst_262144) : (i64) -> !accel_bare.ptr<f32>
+        %c_ub_ptr = accel_bare.inttoptr(%cst_524288) : (i64) -> !accel_bare.ptr<f32>
 
-        %buf_a_ptr = my_accelerator.inttoptr(%cst_0) : (i64) -> !my_accelerator.ptr<f32>
-        %buf_b_ptr = my_accelerator.inttoptr(%cst_0) : (i64) -> !my_accelerator.ptr<f32>
-        %buf_c_ptr = my_accelerator.inttoptr(%cst_0) : (i64) -> !my_accelerator.ptr<f32>
+        %buf_a_ptr = accel_bare.inttoptr(%cst_0) : (i64) -> !accel_bare.ptr<f32>
+        %buf_b_ptr = accel_bare.inttoptr(%cst_0) : (i64) -> !accel_bare.ptr<f32>
+        %buf_c_ptr = accel_bare.inttoptr(%cst_0) : (i64) -> !accel_bare.ptr<f32>
 
-        %dma_copy_size = my_accelerator.constant 262144 : i64
-        my_accelerator.dma_L1_to_ub(%a_ub_ptr, %a, %dma_copy_size) : !my_accelerator.ptr<f32>
-        my_accelerator.dma_L1_to_ub(%b_ub_ptr, %b, %dma_copy_size) : !my_accelerator.ptr<f32>
+        %dma_copy_size = accel_bare.constant 262144 : i64
+        accel_bare.dma_L1_to_ub(%a_ub_ptr, %a, %dma_copy_size) : !accel_bare.ptr<f32>
+        accel_bare.dma_L1_to_ub(%b_ub_ptr, %b, %dma_copy_size) : !accel_bare.ptr<f32>
 
-        my_accelerator.sync_mem()
+        accel_bare.sync_mem()
 
-        my_accelerator.dma_ub_to_buffer_a(%buf_a_ptr, %a_ub_ptr, %dma_copy_size) : !my_accelerator.ptr<f32>
-        my_accelerator.dma_ub_to_buffer_b(%buf_b_ptr, %b_ub_ptr, %dma_copy_size) : !my_accelerator.ptr<f32>
+        accel_bare.dma_ub_to_buffer_a(%buf_a_ptr, %a_ub_ptr, %dma_copy_size) : !accel_bare.ptr<f32>
+        accel_bare.dma_ub_to_buffer_b(%buf_b_ptr, %b_ub_ptr, %dma_copy_size) : !accel_bare.ptr<f32>
 
-        my_accelerator.sync_mem()
+        accel_bare.sync_mem()
 
-        %matmul_config = my_accelerator.constant 0xDEADBEEF : i64
-        my_accelerator.matmul(%buf_c_ptr, %buf_a_ptr, %buf_b_ptr, %matmul_config) : !my_accelerator.ptr<f32>
+        %matmul_config = accel_bare.constant 0xDEADBEEF : i64
+        accel_bare.matmul(%buf_c_ptr, %buf_a_ptr, %buf_b_ptr, %matmul_config) : !accel_bare.ptr<f32>
 
-        my_accelerator.sync_systolic_array()
+        accel_bare.sync_systolic_array()
 
-        my_accelerator.dma_buffer_c_to_ub(%c_ub_ptr, %buf_c_ptr, %dma_copy_size) : !my_accelerator.ptr<f32>
-        my_accelerator.sync_mem()
-        my_accelerator.dma_ub_to_L1(%c, $c_ub_ptr, %dma_copy_size) : !my_accelerator.ptr<f32>
+        accel_bare.dma_buffer_c_to_ub(%c_ub_ptr, %buf_c_ptr, %dma_copy_size) : !accel_bare.ptr<f32>
+        accel_bare.sync_mem()
+        accel_bare.dma_ub_to_L1(%c, $c_ub_ptr, %dma_copy_size) : !accel_bare.ptr<f32>
 
-        my_accelerator.sync_mem()
+        accel_bare.sync_mem()
     }
 }
 ```
@@ -490,9 +492,110 @@ Aside: There is something called "address spaces" that I am abstracting away her
 
 ## 3.3: Level 1: Low-Level Vector / Matrix Operations
 
+```mlir
+module attributes {accel_bare.data_layout = "...",
+                   accel_bare.target_triple = "..."} {
+    func.func @matmul_256_256_f32_kernel(%c: !accel.tensor<256x256xf32, #accel.address_space<L1>>,
+                                         %a: !accel.tensor<256x256xf32, #accel.address_space<L1>>,
+                                         %b: !accel.tensor<256x256xf32, #accel.address_space<L1>>) {
+
+        %a_ub = accel.alloc_tensor() : !accel.tensor<256x256xf32, #accel.address_space<ub>>
+        %b_ub = accel.alloc_tensor() : !accel.tensor<256x256xf32, #accel.address_space<ub>>
+        %c_ub = accel.alloc_tensor() : !accel.tensor<256x256xf32, #accel.address_space<ub>>
+
+        %buf_a = accel.alloc_tensor() : !accel.tensor<256x256xf32, #accel.address_space<buf_a>>
+        %buf_b = accel.alloc_tensor() : !accel.tensor<256x256xf32, #accel.address_space<buf_b>>
+        %buf_c = accel.alloc_tensor() : !accel.tensor<256x256xf32, #accel.address_space<buf_c>>
+
+        accel.dma %a to %a_ub : !accel.tensor<256x256xf32, #accel.address_space<L1>>, 
+                                              to !accel.tensor<256x256xf32, #accel.address_space<ub>>
+        accel.dma %b to %b_ub : !accel.tensor<256x256xf32, #accel.address_space<L1>>, 
+                                              to !accel.tensor<256x256xf32, #accel.address_space<ub>>
+
+        accel_bare.sync_mem()
+
+        accel.dma %a_ub to %buf_a : !accel.tensor<256x256xf32, #accel.address_space<ub>>, 
+                                                      to !accel.tensor<256x256xf32, #accel.address_space<buf_a>>
+        accel.dma %b_ub to %buf_b : !accel.tensor<256x256xf32, #accel.address_space<ub>>, 
+                                                      to !accel.tensor<256x256xf32, #accel.address_space<buf_b>>
+
+        accel_bare.sync_mem()
+
+        accel.matmul %buf_a x %buf_b -> %buf_c :
+                !accel.tensor<256x256xf32, #accel.address_space<buf_a>> x !accel.tensor<256x256xf32, #accel.address_space<buf_b>>
+                    -> !accel.tensor<256x256xf32, #accel.address_space<buf_c>>
+
+        accel_bare.sync_systolic_array()
+
+        accel.dma %buf_c to %c_ub : !accel.tensor<256x256xf32, #accel.address_space<buf_c>>, 
+                                                      to !accel.tensor<256x256xf32, #accel.address_space<ub>>
+        accel_bare.sync_mem()
+        accel.dma %c_ub to %c : !accel.tensor<256x256xf32, #accel.address_space<ub>>, 
+                                              to !accel.tensor<256x256xf32, #accel.address_space<L1>>
+
+        accel_bare.sync_mem()
+    }
+}
+```
+
+## 3.3b: Level 1.5: High-Level Vector / Matrix Operations
+
+```mlir
+module attributes {accel_bare.data_layout = "...",
+                   accel_bare.target_triple = "..."} {
+    func.func @matmul_256_256_f32_kernel(%c: !accel_high.tensor<256x256xf32>,
+                                         %a: !accel_high.tensor<256x256xf32>,
+                                         %b: !accel_high.tensor<256x256xf32>) {
+        accel_high.matmul %a x %b -> %c : !accel_high.tensor<256x256xf32>
+    }
+}
+```
+
+```mlir
+module attributes {llvm.data_layout = "...",
+                   llvm.target_triple = "..."} {
+    func.func @main() {
+        %matrix_a = memref.alloc() : memref<256x256xf32>
+        %matrix_b = memref.alloc() : memref<256x256xf32>
+        %matrix_c = memref.alloc() : memref<256x256xf32>
+
+        accel_host.launch_func @matmul_256_256_f32_kernel 
+                ins(%matrix_a: memref<256x256xf32>, %matrix_b: memref<256x256xf32>)
+                outs(%matrix_c: memref<256x256xf32>)
+    }
+}
+```
+
 ## 3.4: Level 2: Host / Accelerator Launch Abstraction
 
+```mlir
+func.func @main() {
+    %matrix_a = memref.alloc() : memref<256x256xf32>
+    %matrix_b = memref.alloc() : memref<256x256xf32>
+    %matrix_c = memref.alloc() : memref<256x256xf32>
+
+    accel_host.launch ins(%matrix_a: memref<256x256xf32>, %matrix_b: memref<256x256xf32>)
+                      outs(%matrix_c: memref<256x256xf32>) {
+        ^bb0(%a: !accel_high.tensor<256x256xf32>, %b: !accel_high.tensor<256x256xf32>, %c: !accel_high.tensor<256x256xf32>) {
+            accel_high.matmul %a x %b -> %c : !accel_high.tensor<256x256xf32>
+            accel_high.return
+        }
+    }
+}
+```
+
 ## 3.5: Level 3: Kernel Graph Abstraction
+
+```mlir
+func.func @main() {
+    %matrix_a = tensor.empty() : tensor<256x256xf32>
+    %matrix_b = tensor.empty() : tensor<256x256xf32>
+    %cst = arith.constant 0.000000e+00 : f32
+    %matrix_c_init = tensor.splat %cst : tensor<256x256xf32>
+    %matrix_c = linalg.matmul ins(%matrix_a, %matrix_b : tensor<256x256xf32>, tensor<256x256xf32>)
+                              outs(%matrix_c_init : tensor<256x256xf32>) -> tensor<256x1024xf32>
+}
+```
 
 ## 3.6: Level 4: Application Abstraction
 
